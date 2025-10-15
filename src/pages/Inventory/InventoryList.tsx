@@ -1,3 +1,4 @@
+// src/pages/Inventory/InventoryList.tsx
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import PageMeta from "../../components/common/PageMeta";
@@ -9,9 +10,8 @@ import Button from "../../components/ui/button/Button";
 import api from "../../services/api";
 import * as XLSX from "xlsx";
 
-
 function exportToExcel(rows: any[]) {
-  const data = rows.map(r => ({
+  const data = rows.map((r) => ({
     Tip: r.item_type === "product" ? "Ürün" : "Komponent",
     Barkod: r.barcode,
     Tanım: r.name ?? "",
@@ -22,23 +22,20 @@ function exportToExcel(rows: any[]) {
     Durum: r.status_label ?? "",
     Güncelleme: r.updated_at ? new Date(r.updated_at).toLocaleString() : "",
   }));
-
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(data);
   XLSX.utils.book_append_sheet(wb, ws, "Depo Stok");
   XLSX.writeFile(wb, "depo-stok.xlsx");
 }
 
-/* ------------ Types (BE /inventory çıktısıyla uyumlu) ------------ */
 type ItemType = "product" | "component";
-
 type Row = {
-  item_type: ItemType;                 // "product" | "component"
-  item_id: number;                     // id
+  item_type: ItemType;
+  item_id: number;
   barcode: string;
-  name: string | null;                 // master.name
-  unit: string | null;                 // component.unit | master.default_unit
-  quantity: number;                    // EA=>1, M/KG=>stok miktarı (component) | product=>1
+  name: string | null;
+  unit: string | null;
+  quantity: number;
   status_id: number;
   status_label: string;
   warehouse_id?: number | null;
@@ -49,44 +46,35 @@ type Row = {
 };
 
 type Warehouse = { id: number; name: string };
-type Location  = { id: number; name: string; warehouse_id: number };
-
-const STATUS_OPTIONS = [
-  { value: "", label: "Durum (tümü)" },
-  { value: "1", label: "in_stock" },
-  { value: "4", label: "pending" },
-  { value: "6", label: "production" },
-  { value: "7", label: "screenprint" },
-];
+type Location = { id: number; name: string; warehouse_id: number };
 
 const TYPE_OPTIONS = [
-  { value: "all",       label: "Tip (tümü)" },
+  { value: "all", label: "Tümü" },
   { value: "component", label: "Komponent" },
-  { value: "product",   label: "Ürün" },
+  { value: "product", label: "Ürün" },
 ];
 
 export default function InventoryList() {
-  /* ------------ State ------------ */
   const [rows, setRows] = useState<Row[]>([]);
   const [total, setTotal] = useState<number>(0);
 
   // filtreler
   const [q, setQ] = useState("");
   const [type, setType] = useState<string>("all");
-  const [statusId, setStatusId] = useState<string>("");
   const [warehouseId, setWarehouseId] = useState<string>("");
   const [locationId, setLocationId] = useState<string>("");
 
   // lookups
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [locationsByWarehouse, setLocationsByWarehouse] = useState<Record<number, Location[]>>({});
+  const [locationsByWarehouse, setLocationsByWarehouse] =
+    useState<Record<number, Location[]>>({});
 
-  // ui
   const [loading, setLoading] = useState(false);
 
   /* ------------ Lookups ------------ */
   useEffect(() => {
-    api.get("/lookups/warehouses")
+    api
+      .get("/lookups/warehouses")
       .then((r) => setWarehouses(r.data || []))
       .catch((e) => console.error("warehouses error:", e));
   }, []);
@@ -95,7 +83,9 @@ export default function InventoryList() {
     const id = Number(wh || 0);
     if (!id || locationsByWarehouse[id]) return;
     try {
-      const { data } = await api.get(`/lookups/locations`, { params: { warehouseId: id } });
+      const { data } = await api.get(`/lookups/locations`, {
+        params: { warehouseId: id },
+      });
       setLocationsByWarehouse((prev) => ({ ...prev, [id]: data || [] }));
     } catch (e) {
       console.error("locations error:", e);
@@ -104,31 +94,49 @@ export default function InventoryList() {
 
   /* ------------ Options ------------ */
   const warehouseOptions = useMemo(
-    () => [{ value: "", label: "Depo (tümü)" }, ...warehouses.map(w => ({ value: String(w.id), label: w.name }))],
+    () => [
+      { value: "", label: "Depo (Tümü)" },
+      ...warehouses.map((w) => ({ value: String(w.id), label: w.name })),
+    ],
     [warehouses]
   );
 
   const locationOptions = useMemo(() => {
-    const list = warehouseId ? (locationsByWarehouse[Number(warehouseId)] || []) : [];
-    return [{ value: "", label: "Lokasyon (tümü)" }, ...list.map(l => ({ value: String(l.id), label: l.name }))];
+    const list = warehouseId
+      ? locationsByWarehouse[Number(warehouseId)] || []
+      : [];
+    return [
+      { value: "", label: "Lokasyon (Tümü)" },
+      ...list.map((l) => ({ value: String(l.id), label: l.name })),
+    ];
   }, [warehouseId, locationsByWarehouse]);
 
-  /* ------------ Fetch ------------ */
-  const fetchData = async () => {
+  /* ------------ Fetch (override destekli) ------------ */
+  const fetchData = async (overrides?: {
+    q?: string;
+    type?: string;
+    warehouseId?: string;
+    locationId?: string;
+  }) => {
+    const _q = overrides?.q ?? q;
+    const _type = overrides?.type ?? type;
+    const _wh = overrides?.warehouseId ?? warehouseId;
+    const _lc = overrides?.locationId ?? locationId;
+
     setLoading(true);
     try {
       const res = await api.get("/inventory", {
         params: {
-          search: q || undefined,
-          type: type || "all",
-          statusId: statusId || undefined,
-          warehouseId: warehouseId || undefined,
-          locationId: locationId || undefined,
+          search: _q || undefined,
+          type: _type || "all",
+          warehouseId: _wh || undefined,
+          locationId: _lc || undefined,
+          statusId: 1, // sadece Depoda
           limit: 200,
           offset: 0,
         },
       });
-      setRows((res.data?.items || []) as Row[]);
+      setRows((res.data?.items || res.data?.rows || []) as Row[]);
       setTotal(Number(res.data?.total || 0));
     } catch (e) {
       console.error("inventory fetch error:", e);
@@ -139,31 +147,54 @@ export default function InventoryList() {
     }
   };
 
-  useEffect(() => { fetchData(); }, []); // ilk yükleme
+  useEffect(() => {
+    fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* ------------ Handlers ------------ */
+  const handleReset = () => {
+    // state'i temizle
+    setQ("");
+    setType("all");
+    setWarehouseId("");
+    setLocationId("");
+    // anında temiz parametrelerle çek
+    fetchData({ q: "", type: "all", warehouseId: "", locationId: "" });
+  };
 
   /* ------------ Render helpers ------------ */
   const toDetailsHref = (r: Row) =>
-    r.item_type === "product" ? `/details/product/${r.item_id}` : `/details/component/${r.item_id}`;
+    r.item_type === "product"
+      ? `/details/product/${r.item_id}`
+      : `/details/component/${r.item_id}`;
 
   const prettyDate = (v?: string | null) =>
-    v ? new Date(v).toLocaleString() : <span className="text-gray-400 dark:text-gray-500">—</span>;
+    v ? (
+      new Date(v).toLocaleString()
+    ) : (
+      <span className="text-gray-400 dark:text-gray-500">—</span>
+    );
 
   /* ------------ UI ------------ */
   return (
     <div className="space-y-6">
-      <PageMeta title="Depo Stok | TailAdmin" description="Depo bazlı karma stok listesi (Ürün + Komponent)" />
+      <PageMeta
+        title="Depo Stok | TailAdmin"
+        description="Depoda olan stok listesi (Ürün + Komponent)"
+      />
       <PageBreadcrumb pageTitle="Depo Stok" />
 
       {/* Filtreler */}
       <ComponentCard title="Filtreler">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(220px,1fr)_minmax(180px,220px)_minmax(180px,220px)_minmax(180px,220px)_minmax(180px,220px)_auto]">
+        {/* 7 kolon: 4 filtre + 3 buton; buton boyları inputlarla aynı */}
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-7">
           <Input
             placeholder="Ara (barkod, tanım…)"
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
           <Select options={TYPE_OPTIONS} value={type} onChange={setType} placeholder="Tip" />
-          <Select options={STATUS_OPTIONS} value={statusId} onChange={setStatusId} placeholder="Durum" />
           <Select
             options={warehouseOptions}
             value={warehouseId}
@@ -180,10 +211,39 @@ export default function InventoryList() {
             onChange={setLocationId}
             placeholder="Lokasyon"
           />
-          <Button variant="primary" onClick={fetchData}>Uygula</Button>
-          <Button variant="primary" onClick={() => exportToExcel(rows)}>
-            Excel’e Aktar
-          </Button>
+
+          {/* Uygula */}
+          <div className="flex">
+            <Button
+              variant="primary"
+              onClick={() => fetchData()}
+              className="w-full h-11 whitespace-nowrap"
+            >
+              Uygula
+            </Button>
+          </div>
+
+          {/* Sıfırla */}
+          <div className="flex">
+            <Button
+              variant="primary"
+              onClick={handleReset}
+              className="w-full h-11 whitespace-nowrap"
+            >
+              Sıfırla
+            </Button>
+          </div>
+
+          {/* Excel’e Aktar */}
+          <div className="flex">
+            <Button
+              variant="primary"
+              onClick={() => exportToExcel(rows)}
+              className="w-full h-11 whitespace-nowrap"
+            >
+              Excel’e Aktar
+            </Button>
+          </div>
         </div>
       </ComponentCard>
 
@@ -194,50 +254,105 @@ export default function InventoryList() {
             <thead>
               <tr className="text-left">
                 {[
-                  "Tip", "Barkod", "Tanım", "Birim", "Miktar",
-                  "Depo", "Lokasyon", "Durum", "Güncelleme"
+                  "Tip",
+                  "Barkod",
+                  "Tanım",
+                  "Birim",
+                  "Miktar",
+                  "Depo",
+                  "Lokasyon",
+                  "Durum",
+                  "Güncelleme",
                 ].map((h) => (
-                  <th key={h} className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">{h}</th>
+                  <th
+                    key={h}
+                    className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400"
+                  >
+                    {h}
+                  </th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td className="px-4 py-6 text-gray-500 dark:text-gray-400" colSpan={9}>Yükleniyor…</td>
+                  <td
+                    className="px-4 py-6 text-gray-500 dark:text-gray-400"
+                    colSpan={9}
+                  >
+                    Yükleniyor…
+                  </td>
                 </tr>
               ) : rows.length ? (
                 rows.map((r) => (
-                  <tr key={`${r.item_type}-${r.item_id}`} className="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-white/5">
-                    <td className="px-4 py-3">{r.item_type === "product" ? "Ürün" : "Komponent"}</td>
+                  <tr
+                    key={`${r.item_type}-${r.item_id}`}
+                    className="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-white/5"
+                  >
+                    <td className="px-4 py-3">
+                      {r.item_type === "product" ? "Ürün" : "Komponent"}
+                    </td>
 
                     <td className="px-4 py-3">
-                      <Link to={toDetailsHref(r)} className="text-brand-600 hover:underline dark:text-brand-400">
+                      <Link
+                        to={toDetailsHref(r)}
+                        className="text-brand-600 hover:underline dark:text-brand-400"
+                      >
                         {r.barcode}
                       </Link>
                     </td>
 
                     <td className="px-4 py-3 min-w-[240px]">
                       {r.name ? (
-                        <Link to={toDetailsHref(r)} className="text-brand-600 hover:underline dark:text-brand-400">
+                        <Link
+                          to={toDetailsHref(r)}
+                          className="text-brand-600 hover:underline dark:text-brand-400"
+                        >
                           {r.name}
                         </Link>
-                      ) : <span className="text-gray-400 dark:text-gray-500">—</span>}
+                      ) : (
+                        <span className="text-gray-400 dark:text-gray-500">—</span>
+                      )}
                     </td>
 
-                    <td className="px-4 py-3">{r.unit ?? <span className="text-gray-400 dark:text-gray-500">—</span>}</td>
-                    <td className="px-4 py-3">{typeof r.quantity === "number" ? r.quantity : <span className="text-gray-400 dark:text-gray-500">—</span>}</td>
+                    <td className="px-4 py-3">
+                      {r.unit ?? (
+                        <span className="text-gray-400 dark:text-gray-500">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {typeof r.quantity === "number" ? (
+                        r.quantity
+                      ) : (
+                        <span className="text-gray-400 dark:text-gray-500">—</span>
+                      )}
+                    </td>
 
-                    <td className="px-4 py-3">{r.warehouse_name ?? <span className="text-gray-400 dark:text-gray-500">—</span>}</td>
-                    <td className="px-4 py-3">{r.location_name  ?? <span className="text-gray-400 dark:text-gray-500">—</span>}</td>
+                    <td className="px-4 py-3">
+                      {r.warehouse_name ?? (
+                        <span className="text-gray-400 dark:text-gray-500">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {r.location_name ?? (
+                        <span className="text-gray-400 dark:text-gray-500">—</span>
+                      )}
+                    </td>
 
-                    <td className="px-4 py-3">{r.status_label ?? <span className="text-gray-400 dark:text-gray-500">—</span>}</td>
+                    <td className="px-4 py-3">
+                      {r.status_label ?? (
+                        <span className="text-gray-400 dark:text-gray-500">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3">{prettyDate(r.updated_at)}</td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td className="px-4 py-6 text-gray-500 dark:text-gray-400" colSpan={9}>
+                  <td
+                    className="px-4 py-6 text-gray-500 dark:text-gray-400"
+                    colSpan={9}
+                  >
                     Kayıt bulunamadı
                   </td>
                 </tr>
