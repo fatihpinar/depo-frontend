@@ -95,7 +95,7 @@ export default function InventoryList() {
   /* ------------ Options ------------ */
   const warehouseOptions = useMemo(
     () => [
-      { value: "", label: "Depo (Hepsi)" },
+      { value: "", label: "Depo (Tümü)" },
       ...warehouses.map((w) => ({ value: String(w.id), label: w.name })),
     ],
     [warehouses]

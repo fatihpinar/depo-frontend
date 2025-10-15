@@ -116,11 +116,11 @@ export default function ProductionCompletionPage() {
   const GRID_COLS = "grid-cols-[44px_minmax(380px,2fr)_minmax(180px,1fr)_96px_120px_180px_200px]";
 
   return (
-    <div className="space-y-6">
-      <PageMeta title="Üretim Tamamlama" description="Üretimdeki kayıtları tamamlama" />
-      <PageBreadcrumb pageTitle="Üretim Tamamlama" />
+    <div className="space-y-6 text-slate-900 dark:text-slate-100">
+       <PageMeta title="Üretim Tamamlama" description="Üretimdeki kayıtları tamamlama" />
+       <PageBreadcrumb pageTitle="Üretim Tamamlama" />
 
-      <ComponentCard title="Varsayılan Depo & Lokasyon">
+       <ComponentCard title="Varsayılan Depo & Lokasyon">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div>
             <Label>Varsayılan Depo</Label>
@@ -144,16 +144,20 @@ export default function ProductionCompletionPage() {
       </ComponentCard>
 
       <ComponentCard title={`Satırlar (${rows.length})`}>
-        {error && <div className="mb-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
-
-        <div className="mb-2 flex items-center gap-3">
+      {error && (
+                <div className="mb-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700
+                                dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+                  {error}
+                </div>
+              )}
+         <div className="mb-2 flex items-center gap-3">
           <Checkbox checked={allSelected} onChange={toggleAll} /><span className="text-sm">Tümünü Seç</span>
-          <span className="ml-auto text-xs text-gray-500">Seçili: {selectedIds.size}</span>
+          <span className="ml-auto text-xs text-gray-500 dark:text-gray-400">Seçili: {selectedIds.size}</span>
         </div>
 
         <div className="overflow-x-auto">
           <div className="min-w-[1100px]">
-            <div className={`hidden md:grid py-2 text-xs font-medium text-gray-500 ${GRID_COLS}`}>
+            <div className={`hidden md:grid py-2 text-xs font-medium text-gray-500 dark:text-gray-400 ${GRID_COLS}`}>
               <div className="px-3" />
               <div className="px-3 text-left">Tanım</div>
               <div className="px-3 text-left">Barkod</div>
@@ -163,9 +167,9 @@ export default function ProductionCompletionPage() {
               <div className="px-3 text-left">Lokasyon</div>
             </div>
 
-            <div className="divide-y divide-gray-100">
+            <div className="divide-y divide-gray-100 dark:divide-slate-700">
               {rows.length===0 ? (
-                <div className="px-4 py-6 text-sm text-gray-500">Kayıt yok.</div>
+                <div className="px-4 py-6 text-sm text-gray-500 dark:text-gray-400">Kayıt yok.</div>
               ) : rows.map(r=>{
                 const wh = r.warehouse_id ? String(r.warehouse_id) : "";
                 const locOpts = [{ value:"", label:"Seçiniz", disabled:true },
@@ -179,13 +183,13 @@ export default function ProductionCompletionPage() {
                     <div className="px-3"><span className="text-sm">{fmtQty(r)}</span></div>
                     <div className="px-3"><span className="text-sm">{fmtDim(r)}</span></div>
                     <div className="px-3">
-                      <Select className="w-full" options={warehouseOptions} value={wh}
+                      <Select className="w-full dark:text-slate-100" options={warehouseOptions} value={wh}
                         onChange={async (v:string)=>{ const locs=await ensureLocations(v); const nextLoc=String(locs[0]?.id||"");
                           setRows(prev=>prev.map(x=>x.id===r.id&&x.kind===r.kind?{...x,warehouse_id:v?Number(v):undefined,location_id:v?Number(nextLoc):undefined}:x)); }}
                         placeholder="Seçiniz" />
                     </div>
                     <div className="px-3">
-                      <Select className="w-full" options={locOpts} value={r.location_id?String(r.location_id):""}
+                      <Select className="w-full dark:text-slate-100" options={locOpts} value={r.location_id?String(r.location_id):""}
                         onChange={(v:string)=>setRows(prev=>prev.map(x=>x.id===r.id&&x.kind===r.kind?{...x,location_id:v?Number(v):undefined}:x))}
                         placeholder="Seçiniz" />
                     </div>

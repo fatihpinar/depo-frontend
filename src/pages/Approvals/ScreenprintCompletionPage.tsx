@@ -116,7 +116,8 @@ export default function ScreenprintCompletionPage() {
   const GRID_COLS = "grid-cols-[44px_minmax(380px,2fr)_minmax(180px,1fr)_96px_120px_180px_200px]";
 
   return (
-    <div className="space-y-6">
+    // sayfa genel metin rengi
+    <div className="space-y-6 text-gray-800 dark:text-white/90">
       <PageMeta title="Üretim Tamamlama" description="Üretimdeki kayıtları tamamlama" />
       <PageBreadcrumb pageTitle="Üretim Tamamlama" />
 
@@ -144,16 +145,23 @@ export default function ScreenprintCompletionPage() {
       </ComponentCard>
 
       <ComponentCard title={`Satırlar (${rows.length})`}>
-        {error && <div className="mb-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+        {/* hata kutusu dark renkleri */}
+        {error && (
+          <div className="mb-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
+            {error}
+          </div>
+        )}
 
         <div className="mb-2 flex items-center gap-3">
-          <Checkbox checked={allSelected} onChange={toggleAll} /><span className="text-sm">Tümünü Seç</span>
-          <span className="ml-auto text-xs text-gray-500">Seçili: {selectedIds.size}</span>
+          <Checkbox checked={allSelected} onChange={toggleAll} />
+          <span className="text-sm">Tümünü Seç</span>
+          <span className="ml-auto text-xs text-gray-500 dark:text-white/50">Seçili: {selectedIds.size}</span>
         </div>
 
         <div className="overflow-x-auto">
           <div className="min-w-[1100px]">
-            <div className={`hidden md:grid py-2 text-xs font-medium text-gray-500 ${GRID_COLS}`}>
+            {/* başlık satırı için muted metin rengi */}
+            <div className={`hidden md:grid py-2 text-xs font-medium text-gray-500 dark:text-white/60 ${GRID_COLS}`}>
               <div className="px-3" />
               <div className="px-3 text-left">Tanım</div>
               <div className="px-3 text-left">Barkod</div>
@@ -163,9 +171,10 @@ export default function ScreenprintCompletionPage() {
               <div className="px-3 text-left">Lokasyon</div>
             </div>
 
-            <div className="divide-y divide-gray-100">
+            {/* ayırıcı ve boş durum renkleri */}
+            <div className="divide-y divide-gray-100 dark:divide-gray-800">
               {rows.length===0 ? (
-                <div className="px-4 py-6 text-sm text-gray-500">Kayıt yok.</div>
+                <div className="px-4 py-6 text-sm text-gray-500 dark:text-white/50">Kayıt yok.</div>
               ) : rows.map(r=>{
                 const wh = r.warehouse_id ? String(r.warehouse_id) : "";
                 const locOpts = [{ value:"", label:"Seçiniz", disabled:true },
