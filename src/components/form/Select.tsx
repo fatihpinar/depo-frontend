@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import ReactSelect, { components, StylesConfig } from "react-select";
+import ReactSelect, { StylesConfig } from "react-select";
 
 interface Option {
   value: string;
