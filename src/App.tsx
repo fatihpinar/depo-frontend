@@ -15,7 +15,6 @@ import ComponentDetailPage from "./pages/Details/ComponentDetail";
 import LegacyDetailsRedirect from "./pages/LegacyDetailsRedirect";
 
 // Bizim diğer sayfalar
-import MasterEntry from "./pages/Stocks/MasterEntry";
 import StockEntry from "./pages/Stocks/StockEntry";
 import StockList from "./pages/Stocks/StockList";
 import MasterList from "./pages/Masters/MasterList";
@@ -35,7 +34,6 @@ export default function App() {
           <Route index path="/" element={<Home />} />
 
           {/* Bizim yeni sayfalar */}
-          <Route path="/master-entry" element={<MasterEntry />} />
           <Route path="/stock-entry" element={<StockEntry />} />
           <Route path="/product-assemble" element={<ProductAssemble />} />
           <Route path="/masters" element={<MasterList />} />

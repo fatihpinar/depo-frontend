@@ -44,6 +44,7 @@ export default function ComponentDetailPage() {
   const [statusId, setStatusId] = useState<number | "">("");
   const [warehouseId, setWarehouseId] = useState<number | "">("");
   const [locationId, setLocationId] = useState<number | "">("");
+  const [invoiceNo, setInvoiceNo] = useState("");
   const [notes, setNotes] = useState("");
 
   const [unit, setUnit] = useState<"EA" | "M" | "KG" | string>("");
@@ -125,6 +126,7 @@ export default function ComponentDetailPage() {
         setWarehouseId(data.warehouse?.id || "");
         if (data.warehouse?.id) await ensureLocations(data.warehouse.id);
         setLocationId(data.location?.id || "");
+        setInvoiceNo(data.invoice_no || "");
         setNotes(data.notes || "");
         setUnit(data.unit || "");
         setQuantity(Number(data.quantity || 0));
@@ -157,6 +159,7 @@ export default function ComponentDetailPage() {
         status_id: statusId ? Number(statusId) : undefined,
         warehouse_id: warehouseId ? Number(warehouseId) : (Number(statusId) === 1 ? Number(warehouseId) : null),
         location_id:  locationId  ? Number(locationId)  : (Number(statusId) === 1 ? Number(locationId)  : null),
+        invoice_no: invoiceNo.trim() ? invoiceNo.trim() : null,
         notes: notes || null,
         width:  width  === "" ? null : Number(width),
         height: height === "" ? null : Number(height),
@@ -302,6 +305,15 @@ export default function ComponentDetailPage() {
                   value={locationId ? String(locationId) : ""}
                   onChange={(v: string) => setLocationId(v ? Number(v) : "")}
                   placeholder="Seçiniz"
+                />
+              </div>
+              
+              <div>
+                <Label>Fatura No</Label>
+                <Input
+                  value={invoiceNo}
+                  onChange={(e) => setInvoiceNo(e.target.value)}
+                  placeholder="Opsiyonel"
                 />
               </div>
 

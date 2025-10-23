@@ -23,26 +23,29 @@ type NavItem = {
   subItems?: { name: string; path: string; pro?: boolean; new?: boolean }[];
 };
 
-/**
- * ÜST KISIM (MENU)
- * - Dashboard
- * - Stok Girişi
- * - Tanım Listesi
- * - Stok Listesi
- */
+/** ÜST KISIM (MENU) */
 const navItems: NavItem[] = [
-  { icon: <GridIcon />,  name: "Dashboard",    path: "/" },
-  { icon: <ListIcon />,  name: "Tanım Girişi",  path: "/master-entry" },
-  { icon: <ListIcon />,  name: "Stok Girişi",  path: "/stock-entry" },
-  { icon: <ListIcon />,  name: "Ürün Oluşturma",  path: "/product-assemble" },
-  { icon: <TableIcon />, name: "Tanım Listesi", path: "/masters" },
-  { icon: <TableIcon />, name: "Komponent Listesi", path: "/stocks" },
-  { icon: <TableIcon />, name: "Ürün Listesi", path: "/productsList" },
-  { icon: <TableIcon />, name: "Envanter Listesi", path: "/InventoryList" },
-  { icon: <TaskIcon />, name: "Stok Girişi Tamamlama", path: "/stock-receipts" },
-  { icon: <TaskIcon />, name: "Üretim Tamamlama", path: "/production-receipts" },
-  { icon: <TaskIcon />, name: "Serigrafi Tamamlama", path: "/screenprint-receipts" },
+  { icon: <GridIcon />,  name: "Dashboard",   path: "/" },
+  { icon: <ListIcon />,  name: "Stok Girişi", path: "/stock-entry" },
+  { icon: <ListIcon />,  name: "Ürün Oluşturma", path: "/product-assemble" },
+
+  // ▼ YENİ: "Listeler" açılır menüsü
+  {
+    icon: <TableIcon />,
+    name: "Listeler",
+    subItems: [
+      { name: "Tanım Listesi",     path: "/masters" },
+      { name: "Komponent Listesi", path: "/stocks" },
+      { name: "Ürün Listesi",      path: "/productsList" },
+      { name: "Envanter Listesi",  path: "/InventoryList" },
+    ],
+  },
+
+  { icon: <TaskIcon />, name: "Stok Girişi Tamamlama",  path: "/stock-receipts" },
+  { icon: <TaskIcon />, name: "Üretim Tamamlama",       path: "/production-receipts" },
+  { icon: <TaskIcon />, name: "Serigrafi Tamamlama",    path: "/screenprint-receipts" },
 ];
+
 
 /**
  * ALT KISIM (OTHERS)

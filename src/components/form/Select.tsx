@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import ReactSelect, { StylesConfig } from "react-select";
+import { useTheme } from "../../context/ThemeContext";
 
 interface Option { value: string; label: string; disabled?: boolean; }
 interface SelectProps {
@@ -28,10 +29,9 @@ const Select: React.FC<SelectProps> = ({
   const isControlled = value !== undefined;
   const [selectedValue, setSelectedValue] = useState<string>(defaultValue ?? "");
 
-  // theme: html.dark var mı?
-  const isDark =
-    typeof document !== "undefined" &&
-    document.documentElement.classList.contains("dark");
+  // ✅ Tema bilgisi context’ten gelsin (ThemeProvider içinde theme: 'light' | 'dark' olmalı)
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
 
   useEffect(() => { if (!isControlled) setSelectedValue(defaultValue ?? ""); }, [defaultValue, isControlled]);
   useEffect(() => { if (isControlled) setSelectedValue(value ?? ""); }, [value, isControlled]);
@@ -52,16 +52,16 @@ const Select: React.FC<SelectProps> = ({
     onChange(next);
   };
 
-  // react-select inline stil (tailwind’e yakın)
-  const styles: StylesConfig = {
+  // ✅ styles, tema değişince yeniden hesaplanmalı
+  const styles: StylesConfig<Option, false> = useMemo(() => ({
     control: (base, state) => ({
       ...base,
       minHeight: 44,
       borderRadius: 8,
       backgroundColor: "transparent",
       borderColor: state.isFocused
-        ? (isDark ? "rgb(30 64 175)" : "rgb(147 197 253)") // dark:brand-800 / light:brand-300
-        : (isDark ? "rgb(55 65 81)" : "rgb(209 213 219)"), // dark:gray-700 / gray-300
+        ? (isDark ? "rgb(30 64 175)" : "rgb(147 197 253)")
+        : (isDark ? "rgb(55 65 81)" : "rgb(209 213 219)"),
       boxShadow: state.isFocused ? "0 0 0 3px rgba(59,130,246,0.10)" : "none",
       ":hover": {
         borderColor: state.isFocused
@@ -71,7 +71,7 @@ const Select: React.FC<SelectProps> = ({
       paddingLeft: 8,
       paddingRight: 8,
       fontSize: 14,
-      color: isDark ? "rgba(255,255,255,0.9)" : "rgb(17 24 39)", // dark:text-white/90 vs slate-900
+      color: isDark ? "rgba(255,255,255,0.9)" : "rgb(17 24 39)",
     }),
     menuPortal: base => ({ ...base, zIndex: 9999 }),
     menu: base => ({
@@ -79,8 +79,8 @@ const Select: React.FC<SelectProps> = ({
       borderRadius: 8,
       overflow: "hidden",
       boxShadow: "0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1)",
-      backgroundColor: isDark ? "rgb(17 24 39)" : "white", // dark:bg-gray-900
-      border: `1px solid ${isDark ? "rgb(55 65 81)" : "rgb(229 231 235)"}`,   // dark:gray-700 / gray-200
+      backgroundColor: isDark ? "rgb(17 24 39)" : "white",
+      border: `1px solid ${isDark ? "rgb(55 65 81)" : "rgb(229 231 235)"}`,
     }),
     option: (base, state) => ({
       ...base,
@@ -100,10 +100,11 @@ const Select: React.FC<SelectProps> = ({
     dropdownIndicator: base => ({ ...base, padding: 8 }),
     clearIndicator: base => ({ ...base, padding: 8 }),
     indicatorSeparator: () => ({ display: "none" }),
-  };
+  }), [isDark]);
 
   return (
     <ReactSelect
+      key={isDark ? "select-dark" : "select-light"}  // ✅ portal/menü için re-mount garantisi
       inputId={id}
       name={name}
       isDisabled={disabled}
@@ -113,9 +114,7 @@ const Select: React.FC<SelectProps> = ({
       onChange={handleChange}
       placeholder={placeholder}
       isClearable={false}
-      /* 🔽 her zaman aşağı */
       menuPlacement="bottom"
-      /* menü ekran içinde kalsın */
       menuPosition="fixed"
       menuPortalTarget={typeof document !== "undefined" ? document.body : undefined}
       styles={styles}

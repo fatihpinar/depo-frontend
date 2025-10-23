@@ -4,12 +4,18 @@ import api from "../../services/api";
 
 /* UI */
 import ComponentCard from "../../components/common/ComponentCard";
-import Label from "../../components/form/Label"; 
+import Label from "../../components/form/Label";
+import Input from "../../components/form/input/InputField";
 import Select from "../../components/form/Select";
 import Button from "../../components/ui/button/Button";
 import Checkbox from "../../components/form/input/Checkbox";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
+import { Link } from "react-router-dom";
+
+
+/* Scanner (aynısı) */
+import BarcodeScannerModal from "../../components/scan/BarcodeScannerModal";
 
 type Warehouse = { id: number; name: string };
 type Location  = { id: number; name: string; warehouse_id: number };
@@ -29,6 +35,10 @@ type PendingRow = {
 
 const UNIT_WORD: Record<string,string> = { EA: "Ad.", M: "Metre", KG: "Gram" };
 const nf = new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 3 });
+
+/* küçük yardımcı — FE içinde normalize */
+const normalize = (v: string | null | undefined) => String(v ?? "").trim().toUpperCase();
+
 
 export default function StockReceiptApprovalPage() {
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
@@ -69,6 +79,21 @@ export default function StockReceiptApprovalPage() {
     return list;
   };
 
+  /* --- Scanner state (aynısı) --- */
+  const [scanOpen, setScanOpen] = useState(false);
+  const [scanTargetKey, setScanTargetKey] = useState<string | null>(null);
+  const openScannerFor = (r: PendingRow) => {
+    setScanTargetKey(keyOf(r));
+    setScanOpen(true);
+  };
+  const closeScanner = () => setScanOpen(false);
+  const handleScanResult = (text: string) => {
+    if (!scanTargetKey) return;
+    setRows(prev =>
+      prev.map(x => keyOf(x) === scanTargetKey ? ({ ...x, barcode: text }) : x)
+    );
+  };
+
   /* load */
   useEffect(() => {
     (async () => {
@@ -79,26 +104,23 @@ export default function StockReceiptApprovalPage() {
         ]);
         setWarehouses(wh.data || []);
 
-        // yardımcı
-    const toNum = (v: any): number | null =>
-    v === "" || v === null || v === undefined ? null : Number(v);
+        const toNum = (v: any): number | null =>
+          (v === "" || v === null || v === undefined) ? null : Number(v);
 
-    // ...
-    const raw: any[] = pending.data || [];
-    const items: PendingRow[] = raw.map((r) => ({
-    id: r.id,
-    kind: r.kind,
-    barcode: r.barcode,
-    unit: r.unit ?? null,
-    quantity: toNum(r.quantity),
-    width: toNum(r.width),
-    height: toNum(r.height),
-    master: r.master ?? null,
-    warehouse_id: toNum(r.warehouse_id),
-    location_id: toNum(r.location_id),
-    }));
-    setRows(items);
-
+        const raw: any[] = pending.data || [];
+        const items: PendingRow[] = raw.map((r) => ({
+          id: r.id,
+          kind: r.kind,
+          barcode: r.barcode || "",
+          unit: r.unit ?? null,
+          quantity: toNum(r.quantity),
+          width: toNum(r.width),
+          height: toNum(r.height),
+          master: r.master ?? null,
+          warehouse_id: toNum(r.warehouse_id),
+          location_id: toNum(r.location_id),
+        }));
+        setRows(items);
 
         // lokasyonları preload et
         const uniqWh = Array.from(new Set(items.map(r => r.warehouse_id).filter(Boolean))) as number[];
@@ -120,18 +142,43 @@ export default function StockReceiptApprovalPage() {
     ));
   };
 
-  const handleApproveSelected = async () => {
+  // src/pages/Approvals/StockReceiptApprovalPage.tsx içinde
+
+const handleApproveSelected = async () => {
     try {
       const selectedRows = rows.filter(isSelected);
       if (!selectedRows.length) return alert("Önce satır seçiniz.");
-      const missing = selectedRows.filter(r => !r.warehouse_id || !r.location_id);
-      if (missing.length) return alert(`Bazı seçili satırlarda depo/lokasyon eksik. Örn: ${missing[0].master?.display_label ?? missing[0].barcode}`);
+
+      const missingDepot = selectedRows.filter(r => !r.warehouse_id || !r.location_id);
+      if (missingDepot.length) {
+        const ex = (missingDepot[0].master?.display_label) ?? (missingDepot[0].barcode) ?? "(tanım yok)";
+        return alert(`Bazı seçili satırlarda depo/lokasyon eksik. Örn: ${ex}`);
+      }
+
+      // FE tarafında ek: barkod zorunluluğu  format
+      const badBarcode = selectedRows.find(r => {
+        const code = normalize(r.barcode);
+        if (!code) return true;
+        const re = r.kind === "component" ? /^C\d{8}$/ : /^P\d{8}$/;
+        return !re.test(code);
+      });
+      if (badBarcode) {
+        const name = badBarcode.master?.display_label ?? "(tanım yok)";
+        return alert(`Barkod eksik ya da format hatalı. Örn satır: ${name} #${badBarcode.id}`);
+      }
 
       setLoading(true);
       await api.post("/approvals/approve", {
         scope: "stock",
-        items: selectedRows.map(r => ({ id:r.id, kind:r.kind, warehouse_id:r.warehouse_id, location_id:r.location_id })),
+        items: selectedRows.map(r => ({
+          id: r.id,
+          kind: r.kind,
+          warehouse_id: r.warehouse_id,
+          location_id: r.location_id,
+          barcode: normalize(r.barcode), // BE de kullanıyor
+        })),
       });
+
       const ok = new Set(selectedRows.map(keyOf));
       setRows(prev => prev.filter(r => !ok.has(keyOf(r))));
       setSelectedIds(new Set());
@@ -160,9 +207,9 @@ export default function StockReceiptApprovalPage() {
   };
   const labelOf = (r:PendingRow) => `${r.master?.display_label || "(Tanım Yok)"} #${r.id}`;
 
-  /* sabit grid şablonu: header + rows aynı */
+  /* sabit grid şablonu: header  rows aynı */
   const GRID_COLS =
-    "grid-cols-[44px_minmax(380px,2fr)_minmax(180px,1fr)_96px_120px_180px_200px]";
+    "grid-cols-[44px_minmax(380px,2fr)_minmax(260px,1.2fr)_96px_120px_180px_200px]";
 
   return (
     <div className="space-y-6">
@@ -254,6 +301,8 @@ export default function StockReceiptApprovalPage() {
                     })) as any),
                   ];
 
+                  const okBarcode = !!normalize(r.barcode);
+
                   return (
                     <div
                       key={`${r.kind}-${r.id}`}
@@ -264,16 +313,75 @@ export default function StockReceiptApprovalPage() {
                         <Checkbox checked={isSelected(r)} onChange={() => toggleOne(r)} />
                       </div>
 
-                      {/* tanım */}
+                      {/* tanım (detay sayfasına link) */}
                       <div className="px-3">
-                        <span className="truncate text-sm text-gray-800 dark:text-gray-100">
-                          {labelOf(r)}
-                        </span>
+                        {r.master?.id ? (
+                          <Link
+                            to={`/details/master/${r.master.id}`}
+                            className="block max-w-full text-left text-sm text-brand-600 hover:underline underline-offset-2 dark:text-brand-400"
+                            title="Tanım detayını aç"
+                          >
+                            <span className="block overflow-hidden break-words whitespace-normal leading-snug line-clamp-2">
+                              {r.master?.display_label || "(Tanım Yok)"} #{r.id}
+                            </span>
+                          </Link>
+                        ) : (
+                          <span className="block overflow-hidden break-words whitespace-normal leading-snug line-clamp-2 text-sm text-gray-800 dark:text-gray-100">
+                            {labelOf(r)}
+                          </span>
+                        )}
                       </div>
 
-                      {/* barkod */}
+                      {/* barkod — Input  mini kamera butonu */}
                       <div className="px-3">
-                        <span className="truncate text-sm text-gray-800 dark:text-gray-100">{r.barcode}</span>
+                        <div className="relative">
+                          <Input
+                            type="text"
+                            value={r.barcode || ""}
+                            onChange={(e) =>
+                              setRows(prev =>
+                                prev.map(x =>
+                                  x.id === r.id && x.kind === r.kind
+                                    ? ({ ...x, barcode: e.target.value })
+                                    : x
+                                )
+                              )
+                            }
+                            placeholder="Barkod"
+                            className={`pr-10 ${okBarcode || !r.barcode ? "" : "border-error-500 focus:ring-error-500"}`}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => openScannerFor(r)}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-white"
+                            title="Barkod/QR Oku"
+                          >
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              width="18"
+                              height="18"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <path d="M3 7V5a2 2 0 0 1 2-2h2" />
+                              <path d="M17 3h2a2 2 0 0 1 2 2v2" />
+                              <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
+                              <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
+                              <rect x="8" y="8" width="8" height="8" rx="1" />
+                            </svg>
+                          </button>
+                        </div>
+
+                        {/* eski sistemden gelen barkod varsa ve geçersizse minik not */}
+                        {!okBarcode && r.barcode && (
+                          <div className="mt-1 text-xs text-amber-600">
+                            Barkod formatını kontrol ediniz.
+                          </div>
+                        )}
                       </div>
 
                       {/* miktar */}
@@ -341,6 +449,13 @@ export default function StockReceiptApprovalPage() {
           </Button>
         </div>
       </ComponentCard>
+
+      {/* Barkod/QR tarayıcı modal */}
+      <BarcodeScannerModal
+        open={scanOpen}
+        onClose={closeScanner}
+        onResult={handleScanResult}
+      />
     </div>
   );
 }

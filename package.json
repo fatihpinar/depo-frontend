@@ -18,6 +18,8 @@
     "@fullcalendar/timegrid": "^6.1.15",
     "@react-jvectormap/core": "^1.0.4",
     "@react-jvectormap/world": "^1.1.2",
+    "@zxing/browser": "^0.1.5",
+    "@zxing/library": "^0.21.3",
     "apexcharts": "^4.1.0",
     "axios": "^1.12.2",
     "clsx": "^2.1.1",

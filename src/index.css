@@ -776,3 +776,27 @@ span.flatpickr-weekday,
 .simplebar-scrollbar.simplebar-visible:before {
   @apply opacity-100;
 }
+
+/* Light */
+.scroll-area {
+  scrollbar-width: thin;                             /* Firefox */
+  scrollbar-color: #9aa4b2 #eef2f7;                  /* thumb / track */
+}
+.scroll-area::-webkit-scrollbar { height: 10px; }    /* yatay */
+.scroll-area::-webkit-scrollbar-track { background: #eef2f7; }
+.scroll-area::-webkit-scrollbar-thumb {
+  background: #9aa4b2;
+  border-radius: 8px;
+  border: 2px solid #eef2f7;
+}
+
+/* Dark */
+html.dark .scroll-area {
+  scrollbar-color: #3a4453 #0b1220;                 /* Firefox */
+}
+html.dark .scroll-area::-webkit-scrollbar-track { background: #0b1220; }
+html.dark .scroll-area::-webkit-scrollbar-thumb {
+  background: #3a4453;
+  border: 2px solid #0b1220;
+}
+

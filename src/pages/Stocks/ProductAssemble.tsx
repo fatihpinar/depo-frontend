@@ -1,3 +1,4 @@
+// src/pages/Product/ProductAssemble.tsx
 import { useEffect, useMemo, useState } from "react";
 import PageMeta from "../../components/common/PageMeta";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
@@ -98,7 +99,6 @@ export default function ProductAssemble() {
 
   /* ---------- Finalize ---------- */
   const [showFinalize, setShowFinalize] = useState(false);
-  const [newBarcode, setNewBarcode] = useState("");
   const [target, setTarget] = useState<Target | "">("");
 
   // Depo/Lokasyon (hedef=Depo)
@@ -165,21 +165,20 @@ export default function ProductAssemble() {
 
   const recipeReady = useMemo(() => {
     if (recipeMode === "existing") return !!recipeId && !!selectedRecipeMasterId;
-    if (recipeMode === "new")      return !!newRecipeName.trim() || !!selectedRecipeMasterId; // kaydetmeden önce ad var, kaydettikten sonra master id var
+    if (recipeMode === "new")      return !!newRecipeName.trim() || !!selectedRecipeMasterId;
     return true; // none
   }, [recipeMode, recipeId, selectedRecipeMasterId, newRecipeName]);
 
+  // ❗ Barkod artık gerekmiyor (oluşturma anında). Sadece target ve (stock ise) depo/lokasyon yeterli.
   const finalizeValid =
     recipeReady &&
     componentsValid &&
-    newBarcode.trim().length > 0 &&
     !!target &&
     (target !== "stock" || (warehouseId && locationId));
 
   /* ---------- finalize’ı sıfırlayan yardımcı ---------- */
   const invalidateFinalize = () => {
     if (showFinalize) setShowFinalize(false);
-    setNewBarcode("");
     setTarget("");
     setWarehouseId("");
     setLocationId("");
@@ -283,7 +282,7 @@ export default function ProductAssemble() {
     setComponents([]);
     setSearch({});
     setChoices({});
-    invalidateFinalize(); // tarif değişti -> finalize kapat
+    invalidateFinalize();
   };
 
   const handleSelectRecipe = async (rid: string) => {
@@ -297,7 +296,6 @@ export default function ProductAssemble() {
     if (!rid) return;
 
     try {
-      // listedeki master_id’yi bul
       const meta = recipes.find(r => r.recipe_id === rid);
       if (meta?.master_id) setSelectedRecipeMasterId(meta.master_id);
 
@@ -350,12 +348,11 @@ export default function ProductAssemble() {
     try {
       if (!recipeReady) { alert("Önce tarif seçin/kaydedin."); return; }
       if (!componentsValid) { alert("Component seçimleri/miktarları geçerli değil."); return; }
-      if (!newBarcode.trim()) { alert("Barkod zorunlu."); return; }
       if (!target) { alert("Hedef seçiniz."); return; }
       if (target === "stock" && (!warehouseId || !locationId)) {
         alert("Depo hedefi için depo ve lokasyon seçiniz."); return;
       }
-      const master_id = selectedRecipeMasterId; // ürün master’ı tarif master’ı
+      const master_id = selectedRecipeMasterId; // Ürün master’ı tarif master’ı
 
       if (!master_id) { alert("Seçili tarifin master bilgisi bulunamadı."); return; }
 
@@ -368,10 +365,10 @@ export default function ProductAssemble() {
         };
       });
 
-      const payload = {
+      const payload: any = {
         product: {
           master_id,
-          barcode: newBarcode.trim(),
+          // barcode YOK — depoya alma/etiketleme aşamasında zorunlu olacak
           target,
           warehouse_id: target === "stock" ? Number(warehouseId) : undefined,
           location_id:  target === "stock" ? Number(locationId)  : undefined,
@@ -385,7 +382,6 @@ export default function ProductAssemble() {
 
       // reset
       setShowFinalize(false);
-      setNewBarcode("");
       setTarget("");
       setWarehouseId("");
       setLocationId("");
@@ -399,7 +395,7 @@ export default function ProductAssemble() {
     }
   };
 
-  /* ---------- Yeni tarifi kaydet (BUTON ARTIK COMPONENTLER KARTINDA) ---------- */
+  /* ---------- Yeni tarifi kaydet ---------- */
   const handleSaveRecipe = async () => {
     try {
       if (recipeMode !== "new") return;
@@ -407,7 +403,6 @@ export default function ProductAssemble() {
       if (!productCategoryId || !bantTypeId) { alert("PRODUCT/BANT kimliği bulunamadı."); return; }
       if (!components.length) { alert("Tarife eklenecek component yok."); return; }
 
-      // component seçili satırlardan master bazında miktar topla
       const totals = new Map<number, number>();
       for (const c of components) {
         const sid = c.stock?.master_id;
@@ -427,13 +422,12 @@ export default function ProductAssemble() {
         master: {
           category_id: productCategoryId,
           type_id: bantTypeId,
-          recipe_name: newRecipeName.trim(), // display_label olarak da kullanılacak (BE’de)
+          recipe_name: newRecipeName.trim(),
         },
         items,
       };
 
       const { data } = await api.post("/recipes", payload);
-      // { master_id, recipe_id, recipe_name }
       const rid = data?.recipe_id || "";
       const mid = data?.master_id || null;
 
@@ -443,7 +437,6 @@ export default function ProductAssemble() {
       await loadRecipes();
       alert(`Tarif kaydedildi${rid ? ` (ID: ${rid})` : ""}.`);
 
-      // finalize’ı yine kapalı tut (tarif değişti = yeni seçildi)
       invalidateFinalize();
       setRecipeMode("existing");
     } catch (err: any) {
@@ -494,7 +487,6 @@ export default function ProductAssemble() {
                 value={newRecipeName}
                 onChange={(e) => {
                   setNewRecipeName(e.target.value);
-                  // isim değişimi de pratikte "tarif değişimi" sayılır → finalize’ı kapalı tutalım
                   invalidateFinalize();
                 }}
                 placeholder="Örn. Kırmızı Bant (50mm)"
@@ -707,19 +699,10 @@ export default function ProductAssemble() {
         </div>
       </ComponentCard>
 
-      {/* BARKOD & HEDEF */}
+      {/* HEDEF (Barkodsuz) */}
       {showFinalize && (
-        <ComponentCard title="Barkod & Hedef">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-            <div>
-              <Label>Barkod (Zorunlu)</Label>
-              <Input
-                value={newBarcode}
-                onChange={(e) => setNewBarcode(e.target.value)}
-                placeholder="Yeni ürün barkodu"
-              />
-            </div>
-
+        <ComponentCard title="Hedef">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <div>
               <Label>Hedef</Label>
               <Select
