@@ -14,7 +14,7 @@ export type Me = {
   permissions?: string[];
 };
 
-export default function UserDropdown({ me }: { me: Me | null }) {
+export default function UserDropdown({ me = null }: { me?: Me | null }) {
   const [isOpen, setIsOpen] = useState(false);
   const navigate = useNavigate();
 
@@ -32,6 +32,7 @@ export default function UserDropdown({ me }: { me: Me | null }) {
   const displayName = me?.full_name ?? me?.username ?? "Kullanıcı";
   const displayUsername = me?.username ?? "";
   const displayEmail = me?.email ?? "";
+
 
   return (
     <div className="relative">
@@ -83,13 +84,15 @@ export default function UserDropdown({ me }: { me: Me | null }) {
         {/* Açılır panel başlığı: önce username, sonra e-posta */}
         <div>
           {displayUsername && (
-            <span className="block font-medium text-gray-700 text-theme-sm dark:text-gray-400">
+            <span className="mt-0.5 block text-theme-xs text-gray-500 dark:text-gray-400">
               {displayUsername}
             </span>
           )}
-          <span className="mt-0.5 block text-theme-xs text-gray-500 dark:text-gray-400">
-            {displayEmail}
-          </span>
+          {displayEmail && (
+            <span className="mt-0.5 block text-theme-xs text-gray-500 dark:text-gray-400">
+              {displayEmail}
+            </span>
+          )}
         </div>
 
         {/* Menü */}
