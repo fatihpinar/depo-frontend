@@ -146,7 +146,7 @@ export default function MasterDetailPage() {
           </div>
 
           <div className="mt-3 text-xs text-gray-500 dark:text-gray-400">
-            Master’da yalnızca <b>Bimeks Kodu</b> düzenlenebilir.
+            Master yalnızca görüntülenebilir, düzenlenemez.
           </div>
 
           <div className="mt-6 flex justify-end">

@@ -1,3 +1,4 @@
+// src/components/form/input/InputField.tsx
 import type React from "react";
 import type { FC } from "react";
 
@@ -9,13 +10,14 @@ interface InputProps {
   value?: string | number;
   onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void;
   className?: string;
-  min?: number | string;   // ⬅︎ değişti
-  max?: number | string;   // ⬅︎ değişti
-  step?: number | string;  // ⬅︎ istersen bunu da esnek yap
+  min?: number | string;
+  max?: number | string;
+  step?: number | string;
   disabled?: boolean;
   success?: boolean;
   error?: boolean;
   hint?: string;
+  required?: boolean;        // ✅ eklendi
 }
 
 const Input: FC<InputProps> = ({
@@ -33,6 +35,7 @@ const Input: FC<InputProps> = ({
   success = false,
   error = false,
   hint,
+  required = false,          // ✅ eklendi
 }) => {
   let inputClasses =
     `h-11 w-full rounded-lg border appearance-none px-4 py-2.5 text-sm shadow-theme-xs ` +
@@ -70,15 +73,11 @@ const Input: FC<InputProps> = ({
         max={max}
         step={step}
         disabled={disabled}
+        required={required}    // ✅ eklendi
         className={inputClasses}
       />
-
       {hint && (
-        <p
-          className={`mt-1.5 text-xs ${
-            error ? "text-error-500" : success ? "text-success-500" : "text-gray-500"
-          }`}
-        >
+        <p className={`mt-1.5 text-xs ${error ? "text-error-500" : success ? "text-success-500" : "text-gray-500"}`}>
           {hint}
         </p>
       )}

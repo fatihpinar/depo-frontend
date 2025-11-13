@@ -41,11 +41,13 @@ type Row = {
   master?: { id: number; display_label?: string | null };
   created_by?: number | null;
   approved_by?: number | null;
+  created_by_user?: { id: number; username?: string; full_name?: string } | null;   // 👈
+  approved_by_user?: { id: number; username?: string; full_name?: string } | null;  // 👈
   created_at?: string;
   updated_at?: string;
   approved_at?: string | null;
   notes?: string | null;
-  invoice_no?: string | null; // 👈 yeni
+  invoice_no?: string | null;
 };
 
 export default function StockListPage() {
@@ -233,16 +235,18 @@ export default function StockListPage() {
                         <span className="text-gray-400 dark:text-gray-500">—</span>
                       )}
                     </td>
+                    <td className="px-4 py-3">
+                      {r.created_by_user?.full_name
+                        ?? r.created_by_user?.username
+                        ?? r.created_by
+                        ?? <span className="text-gray-400 dark:text-gray-500">—</span>}
+                    </td>
 
                     <td className="px-4 py-3">
-                      {r.created_by ?? (
-                        <span className="text-gray-400 dark:text-gray-500">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {r.approved_by ?? (
-                        <span className="text-gray-400 dark:text-gray-500">—</span>
-                      )}
+                      {r.approved_by_user?.full_name
+                        ?? r.approved_by_user?.username
+                        ?? r.approved_by
+                        ?? <span className="text-gray-400 dark:text-gray-500">—</span>}
                     </td>
                     <td className="px-4 py-3">
                       {r.created_at ? (

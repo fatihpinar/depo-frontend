@@ -13,8 +13,7 @@ import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
 import { Link } from "react-router-dom";
 
-
-/* Scanner (aynısı) */
+/* Scanner */
 import BarcodeScannerModal from "../../components/scan/BarcodeScannerModal";
 
 type Warehouse = { id: number; name: string };
@@ -36,9 +35,7 @@ type PendingRow = {
 const UNIT_WORD: Record<string,string> = { EA: "Ad.", M: "Metre", KG: "Gram" };
 const nf = new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 3 });
 
-/* küçük yardımcı — FE içinde normalize */
 const normalize = (v: string | null | undefined) => String(v ?? "").trim().toUpperCase();
-
 
 export default function StockReceiptApprovalPage() {
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
@@ -79,7 +76,7 @@ export default function StockReceiptApprovalPage() {
     return list;
   };
 
-  /* --- Scanner state (aynısı) --- */
+  /* Scanner state */
   const [scanOpen, setScanOpen] = useState(false);
   const [scanTargetKey, setScanTargetKey] = useState<string | null>(null);
   const openScannerFor = (r: PendingRow) => {
@@ -122,7 +119,6 @@ export default function StockReceiptApprovalPage() {
         }));
         setRows(items);
 
-        // lokasyonları preload et
         const uniqWh = Array.from(new Set(items.map(r => r.warehouse_id).filter(Boolean))) as number[];
         await Promise.all(uniqWh.map(id => ensureLocations(id)));
       } catch (e:any) {
@@ -142,9 +138,7 @@ export default function StockReceiptApprovalPage() {
     ));
   };
 
-  // src/pages/Approvals/StockReceiptApprovalPage.tsx içinde
-
-const handleApproveSelected = async () => {
+  const handleApproveSelected = async () => {
     try {
       const selectedRows = rows.filter(isSelected);
       if (!selectedRows.length) return alert("Önce satır seçiniz.");
@@ -155,7 +149,6 @@ const handleApproveSelected = async () => {
         return alert(`Bazı seçili satırlarda depo/lokasyon eksik. Örn: ${ex}`);
       }
 
-      // FE tarafında ek: barkod zorunluluğu  format
       const badBarcode = selectedRows.find(r => {
         const code = normalize(r.barcode);
         if (!code) return true;
@@ -175,7 +168,7 @@ const handleApproveSelected = async () => {
           kind: r.kind,
           warehouse_id: r.warehouse_id,
           location_id: r.location_id,
-          barcode: normalize(r.barcode), // BE de kullanıyor
+          barcode: normalize(r.barcode),
         })),
       });
 
@@ -207,9 +200,7 @@ const handleApproveSelected = async () => {
   };
   const labelOf = (r:PendingRow) => `${r.master?.display_label || "(Tanım Yok)"} #${r.id}`;
 
-  /* sabit grid şablonu: header  rows aynı */
-  const GRID_COLS =
-    "grid-cols-[44px_minmax(380px,2fr)_minmax(260px,1.2fr)_96px_120px_180px_200px]";
+  const GRID_COLS = "grid-cols-[44px_minmax(380px,2fr)_minmax(260px,1.2fr)_96px_120px_180px_200px]";
 
   return (
     <div className="space-y-6">
@@ -267,16 +258,16 @@ const handleApproveSelected = async () => {
           </div>
         )}
 
-        <div className="mb-2 flex items-center gap-3">
+        <div className="mb-4 flex items-center gap-3">
           <Checkbox checked={allSelected} onChange={toggleAll} />
           <span className="text-sm text-gray-700 dark:text-gray-300">Tümünü Seç</span>
           <span className="ml-auto text-xs text-gray-500">Seçili: {selectedIds.size}</span>
         </div>
 
-        <div className="overflow-x-auto">
+        {/* DESKTOP: Table Layout */}
+        <div className="hidden md:block overflow-x-auto">
           <div className="min-w-[1100px]">
-            {/* HEADER */}
-            <div className={`hidden md:grid py-2 text-xs font-medium text-gray-500 dark:text-gray-400 ${GRID_COLS}`}>
+            <div className={`grid py-2 text-xs font-medium text-gray-500 dark:text-gray-400 ${GRID_COLS}`}>
               <div className="px-3 text-left" />
               <div className="px-3 text-left">Tanım</div>
               <div className="px-3 text-left">Barkod</div>
@@ -286,7 +277,6 @@ const handleApproveSelected = async () => {
               <div className="px-3 text-left">Lokasyon</div>
             </div>
 
-            {/* ROWS */}
             <div className="divide-y divide-gray-100 dark:divide-gray-800">
               {rows.length === 0 ? (
                 <div className="px-4 py-6 text-sm text-gray-500">Onay bekleyen kayıt yok.</div>
@@ -300,39 +290,26 @@ const handleApproveSelected = async () => {
                       label: l.name,
                     })) as any),
                   ];
-
                   const okBarcode = !!normalize(r.barcode);
 
                   return (
-                    <div
-                      key={`${r.kind}-${r.id}`}
-                      className={`grid items-center gap-0 py-2 ${GRID_COLS}`}
-                    >
-                      {/* checkbox */}
+                    <div key={`${r.kind}-${r.id}`} className={`grid items-center gap-0 py-2 ${GRID_COLS}`}>
                       <div className="px-3">
                         <Checkbox checked={isSelected(r)} onChange={() => toggleOne(r)} />
                       </div>
 
-                      {/* tanım (detay sayfasına link) */}
                       <div className="px-3">
-                        {r.master?.id ? (
-                          <Link
-                            to={`/details/master/${r.master.id}`}
-                            className="block max-w-full text-left text-sm text-brand-600 hover:underline underline-offset-2 dark:text-brand-400"
-                            title="Tanım detayını aç"
-                          >
-                            <span className="block overflow-hidden break-words whitespace-normal leading-snug line-clamp-2">
-                              {r.master?.display_label || "(Tanım Yok)"} #{r.id}
-                            </span>
-                          </Link>
-                        ) : (
-                          <span className="block overflow-hidden break-words whitespace-normal leading-snug line-clamp-2 text-sm text-gray-800 dark:text-gray-100">
-                            {labelOf(r)}
+                        <Link
+                          to={`/details/${r.kind}/${r.id}`}
+                          className="block max-w-full text-left text-sm text-brand-600 hover:underline underline-offset-2 dark:text-brand-400"
+                          title={`${r.kind === 'component' ? 'Komponent' : 'Ürün'} detayını aç`}
+                        >
+                          <span className="block overflow-hidden break-words whitespace-normal leading-snug line-clamp-2">
+                            {r.master?.display_label || "(Tanım Yok)"} #{r.id}
                           </span>
-                        )}
+                        </Link>
                       </div>
 
-                      {/* barkod — Input  mini kamera butonu */}
                       <div className="px-3">
                         <div className="relative">
                           <Input
@@ -356,17 +333,7 @@ const handleApproveSelected = async () => {
                             className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-white"
                             title="Barkod/QR Oku"
                           >
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              width="18"
-                              height="18"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                               <path d="M3 7V5a2 2 0 0 1 2-2h2" />
                               <path d="M17 3h2a2 2 0 0 1 2 2v2" />
                               <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
@@ -375,26 +342,19 @@ const handleApproveSelected = async () => {
                             </svg>
                           </button>
                         </div>
-
-                        {/* eski sistemden gelen barkod varsa ve geçersizse minik not */}
                         {!okBarcode && r.barcode && (
-                          <div className="mt-1 text-xs text-amber-600">
-                            Barkod formatını kontrol ediniz.
-                          </div>
+                          <div className="mt-1 text-xs text-amber-600">Barkod formatını kontrol ediniz.</div>
                         )}
                       </div>
 
-                      {/* miktar */}
                       <div className="px-3">
                         <span className="text-sm text-gray-800 dark:text-gray-100">{fmtQty(r)}</span>
                       </div>
 
-                      {/* en×boy */}
                       <div className="px-3">
                         <span className="text-sm text-gray-800 dark:text-gray-100">{fmtDim(r)}</span>
                       </div>
 
-                      {/* depo */}
                       <div className="px-3">
                         <Select
                           className="w-full"
@@ -406,20 +366,15 @@ const handleApproveSelected = async () => {
                             setRows((prev) =>
                               prev.map((x) =>
                                 x.id === r.id && x.kind === r.kind
-                                  ? {
-                                      ...x,
-                                      warehouse_id: v ? Number(v) : undefined,
-                                      location_id: v ? Number(nextLoc) : undefined,
-                                    }
-                                  : x,
-                              ),
+                                  ? { ...x, warehouse_id: v ? Number(v) : undefined, location_id: v ? Number(nextLoc) : undefined }
+                                  : x
+                              )
                             );
                           }}
                           placeholder="Seçiniz"
                         />
                       </div>
 
-                      {/* lokasyon */}
                       <div className="px-3">
                         <Select
                           className="w-full"
@@ -428,8 +383,8 @@ const handleApproveSelected = async () => {
                           onChange={(v: string) =>
                             setRows((prev) =>
                               prev.map((x) =>
-                                x.id === r.id && x.kind === r.kind ? { ...x, location_id: v ? Number(v) : undefined } : x,
-                              ),
+                                x.id === r.id && x.kind === r.kind ? { ...x, location_id: v ? Number(v) : undefined } : x
+                              )
                             )
                           }
                           placeholder="Seçiniz"
@@ -443,6 +398,125 @@ const handleApproveSelected = async () => {
           </div>
         </div>
 
+        {/* MOBILE: Card Layout */}
+        <div className="md:hidden space-y-3">
+          {rows.length === 0 ? (
+            <div className="px-4 py-6 text-sm text-gray-500">Onay bekleyen kayıt yok.</div>
+          ) : (
+            rows.map((r) => {
+              const wh = r.warehouse_id ? String(r.warehouse_id) : "";
+              const locOpts = [
+                { value: "", label: "Seçiniz", disabled: true },
+                ...(((wh ? locationsByWarehouse[Number(wh)] : []) || []).map((l) => ({
+                  value: String(l.id),
+                  label: l.name,
+                })) as any),
+              ];
+              const okBarcode = !!normalize(r.barcode);
+
+              return (
+                <div key={`${r.kind}-${r.id}`} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+                  {/* Header */}
+                  <div className="mb-3 flex items-start gap-3">
+                    <div className="pt-1">
+                      <Checkbox checked={isSelected(r)} onChange={() => toggleOne(r)} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <Link
+                        to={`/details/${r.kind}/${r.id}`}
+                        className="block text-sm font-semibold text-brand-600 hover:underline underline-offset-2 dark:text-brand-400"
+                        title={`${r.kind === 'component' ? 'Komponent' : 'Ürün'} detayını aç`}
+                      >
+                        {r.master?.display_label || "(Tanım Yok)"} #{r.id}
+                      </Link>
+                      <div className="mt-1 text-xs text-gray-500">
+                        {fmtQty(r)} • {fmtDim(r)}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Fields */}
+                  <div className="space-y-3">
+                    <div>
+                      <Label>Barkod</Label>
+                      <div className="relative">
+                        <Input
+                          type="text"
+                          value={r.barcode || ""}
+                          onChange={(e) =>
+                            setRows(prev =>
+                              prev.map(x =>
+                                x.id === r.id && x.kind === r.kind
+                                  ? ({ ...x, barcode: e.target.value })
+                                  : x
+                              )
+                            )
+                          }
+                          placeholder="Barkod"
+                          className={`pr-10 ${okBarcode || !r.barcode ? "" : "border-error-500 focus:ring-error-500"}`}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => openScannerFor(r)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-white"
+                          title="Barkod/QR Oku"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M3 7V5a2 2 0 0 1 2-2h2" />
+                            <path d="M17 3h2a2 2 0 0 1 2 2v2" />
+                            <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
+                            <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
+                            <rect x="8" y="8" width="8" height="8" rx="1" />
+                          </svg>
+                        </button>
+                      </div>
+                      {!okBarcode && r.barcode && (
+                        <div className="mt-1 text-xs text-amber-600">Barkod formatını kontrol ediniz.</div>
+                      )}
+                    </div>
+
+                    <div>
+                      <Label>Depo</Label>
+                      <Select
+                        options={warehouseOptions}
+                        value={wh}
+                        onChange={async (v: string) => {
+                          const locs = await ensureLocations(v);
+                          const nextLoc = String(locs[0]?.id || "");
+                          setRows((prev) =>
+                            prev.map((x) =>
+                              x.id === r.id && x.kind === r.kind
+                                ? { ...x, warehouse_id: v ? Number(v) : undefined, location_id: v ? Number(nextLoc) : undefined }
+                                : x
+                            )
+                          );
+                        }}
+                        placeholder="Seçiniz"
+                      />
+                    </div>
+
+                    <div>
+                      <Label>Lokasyon</Label>
+                      <Select
+                        options={locOpts}
+                        value={r.location_id ? String(r.location_id) : ""}
+                        onChange={(v: string) =>
+                          setRows((prev) =>
+                            prev.map((x) =>
+                              x.id === r.id && x.kind === r.kind ? { ...x, location_id: v ? Number(v) : undefined } : x
+                            )
+                          )
+                        }
+                        placeholder="Seçiniz"
+                      />
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
         <div className="mt-6 flex justify-end">
           <Button variant="primary" onClick={handleApproveSelected} disabled={loading || selectedIds.size === 0}>
             Seçilenleri Onayla
@@ -450,7 +524,6 @@ const handleApproveSelected = async () => {
         </div>
       </ComponentCard>
 
-      {/* Barkod/QR tarayıcı modal */}
       <BarcodeScannerModal
         open={scanOpen}
         onClose={closeScanner}

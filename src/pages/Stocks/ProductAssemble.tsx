@@ -9,6 +9,9 @@ import Select from "../../components/form/Select";
 import Button from "../../components/ui/button/Button";
 import api from "../../services/api";
 
+/* -------------------- Config -------------------- */
+const RECIPES_BASE = "/products/recipes";
+
 /* -------------------- Types -------------------- */
 type Target = "production" | "screenprint" | "stock";
 type RecipeMode = "none" | "existing" | "new";
@@ -76,7 +79,7 @@ export default function ProductAssemble() {
   const loadRecipes = async () => {
     if (!productCategoryId || !bantTypeId) return;
     try {
-      const { data } = await api.get("/recipes", {
+      const { data } = await api.get(RECIPES_BASE, {
         params: { categoryId: productCategoryId, typeId: bantTypeId },
       });
       const rows = (data || []).map((r: any) => ({
@@ -90,7 +93,10 @@ export default function ProductAssemble() {
       setRecipes([]);
     }
   };
-  useEffect(() => { loadRecipes(); /* eslint-disable-next-line */ }, [productCategoryId, bantTypeId]);
+  useEffect(() => {
+    loadRecipes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productCategoryId, bantTypeId]);
 
   /* ---------- Components ---------- */
   const [components, setComponents] = useState<PickedComponent[]>([]);
@@ -100,6 +106,7 @@ export default function ProductAssemble() {
   /* ---------- Finalize ---------- */
   const [showFinalize, setShowFinalize] = useState(false);
   const [target, setTarget] = useState<Target | "">("");
+  const [bimeksCode, setBimeksCode] = useState<string>("");
 
   // Depo/Lokasyon (hedef=Depo)
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
@@ -127,7 +134,7 @@ export default function ProductAssemble() {
   };
 
   const selectedIds = useMemo(
-    () => components.map(c => c.stock?.id).filter(Boolean) as number[],
+    () => components.map((c) => c.stock?.id).filter(Boolean) as number[],
     [components]
   );
 
@@ -142,18 +149,49 @@ export default function ProductAssemble() {
     []
   );
 
-  const recipeModeOptions = useMemo(() => ([
-    { value: "none",     label: "Tarifsiz (manuel)" },
-    { value: "existing", label: "Var olan tarifi kullan" },
-    { value: "new",      label: "Yeni tarif oluştur" },
-  ]), []);
+  /* ---------- Yardımcılar ---------- */
+  const toneClass = (n: number, zeroIsRed = false) => {
+    if (!Number.isFinite(n)) return "";
+    if (zeroIsRed && n === 0) return "text-rose-600";
+    if (n > 5) return "text-emerald-600";
+    if (n >= 1) return "text-amber-600";
+    return "";
+  };
 
-  const recipeSelectOptions = useMemo(() => ([
-    { value: "", label: "Tarif seçiniz", disabled: true },
-    ...recipes.map(r => ({ value: r.recipe_id, label: r.label }))
-  ]), [recipes]);
+  const unitLabel = (unit?: string) => (unit === "EA" ? "adet" : unit ?? "");
 
-  /* ---------- Helpers ---------- */
+  const recipeModeOptions = useMemo(
+    () => [
+      { value: "none", label: "Tarifsiz (manuel)" },
+      { value: "existing", label: "Var olan tarifi kullan" },
+      { value: "new", label: "Yeni tarif oluştur" },
+    ],
+    []
+  );
+
+  const recipeSelectOptions = useMemo(
+    () => [{ value: "", label: "Tarif seçiniz", disabled: true }, ...recipes.map((r) => ({ value: r.recipe_id, label: r.label }))],
+    [recipes]
+  );
+
+  /* ---------- FE: master bazında toplam stok (cache) ---------- */
+  const [masterTotals, setMasterTotals] = useState<Record<number, number>>({});
+
+  const ensureMasterTotal = async (masterId?: number) => {
+    if (!masterId) return;
+    if (masterTotals[masterId] !== undefined) return; // cache
+    try {
+      const { data } = await api.get("/components", {
+        params: { availableOnly: true, masterId },
+      });
+      const total = (data || []).reduce((sum: number, r: any) => sum + Number(r.quantity || 0), 0);
+      setMasterTotals((m) => ({ ...m, [masterId]: total }));
+    } catch {
+      setMasterTotals((m) => ({ ...m, [masterId]: 0 }));
+    }
+  };
+
+  /* ---------- Validasyon ---------- */
   const componentsValid =
     components.length > 0 &&
     components.every((c) => {
@@ -165,16 +203,13 @@ export default function ProductAssemble() {
 
   const recipeReady = useMemo(() => {
     if (recipeMode === "existing") return !!recipeId && !!selectedRecipeMasterId;
-    if (recipeMode === "new")      return !!newRecipeName.trim() || !!selectedRecipeMasterId;
+    if (recipeMode === "new") return !!newRecipeName.trim() || !!selectedRecipeMasterId;
     return true; // none
   }, [recipeMode, recipeId, selectedRecipeMasterId, newRecipeName]);
 
-  // ❗ Barkod artık gerekmiyor (oluşturma anında). Sadece target ve (stock ise) depo/lokasyon yeterli.
+  // BE: bimeks_code opsiyonel — FE’de zorunluluğu kaldır
   const finalizeValid =
-    recipeReady &&
-    componentsValid &&
-    !!target &&
-    (target !== "stock" || (warehouseId && locationId));
+    recipeReady && componentsValid && !!target && (target !== "stock" || (warehouseId && locationId));
 
   /* ---------- finalize’ı sıfırlayan yardımcı ---------- */
   const invalidateFinalize = () => {
@@ -182,6 +217,7 @@ export default function ProductAssemble() {
     setTarget("");
     setWarehouseId("");
     setLocationId("");
+    setBimeksCode("");
   };
 
   /* ---------- API: picker ---------- */
@@ -198,10 +234,12 @@ export default function ProductAssemble() {
         quantity: r.quantity,
         name: r.master?.display_label || r.master?.name || r.master_name || r.name || null,
         warehouse: r.warehouse || { id: 0, name: "-" },
-        location:  r.location  || { id: 0, name: "-" },
+        location: r.location || { id: 0, name: "-" },
         master_id: r.master?.id ?? r.master_id,
       }));
       setChoices((prev) => ({ ...prev, [rowKey]: items }));
+
+      if (expectedMasterId) ensureMasterTotal(expectedMasterId);
     } catch (e) {
       console.error("components fetch error:", e);
       setChoices((prev) => ({ ...prev, [rowKey]: [] }));
@@ -242,12 +280,13 @@ export default function ProductAssemble() {
           ? {
               ...c,
               stock: row,
-              consumeQty: row.unit === "EA" ? undefined : (c.consumeQty ?? undefined),
+              consumeQty: row.unit === "EA" ? undefined : c.consumeQty ?? undefined,
               open: false,
             }
           : c
       )
     );
+    ensureMasterTotal(row.master_id);
   };
 
   const removeRow = (key: string) => {
@@ -296,14 +335,14 @@ export default function ProductAssemble() {
     if (!rid) return;
 
     try {
-      const meta = recipes.find(r => r.recipe_id === rid);
+      const meta = recipes.find((r) => r.recipe_id === rid);
       if (meta?.master_id) setSelectedRecipeMasterId(meta.master_id);
 
-      const { data } = await api.get(`/recipes/${rid}/items`);
-      const items: Array<{ component_master_id: number; component_label: string; quantity: number, unit?: string }> =
+      const { data } = await api.get(`${RECIPES_BASE}/${rid}/items`);
+      const items: Array<{ component_master_id: number; component_label: string; quantity: number; unit?: string }> =
         data?.items || [];
 
-      items.forEach(it => {
+      items.forEach((it) => {
         addComponentRow({
           expectedMasterId: it.component_master_id,
           expectedLabel: it.component_label,
@@ -346,17 +385,30 @@ export default function ProductAssemble() {
   /* ---------- Ürün oluştur ---------- */
   const handleSaveProduct = async () => {
     try {
-      if (!recipeReady) { alert("Önce tarif seçin/kaydedin."); return; }
-      if (!componentsValid) { alert("Component seçimleri/miktarları geçerli değil."); return; }
-      if (!target) { alert("Hedef seçiniz."); return; }
-      if (target === "stock" && (!warehouseId || !locationId)) {
-        alert("Depo hedefi için depo ve lokasyon seçiniz."); return;
+      if (!recipeReady) {
+        alert("Önce tarif seçin/kaydedin.");
+        return;
       }
-      const master_id = selectedRecipeMasterId; // Ürün master’ı tarif master’ı
+      if (!componentsValid) {
+        alert("Component seçimleri/miktarları geçerli değil.");
+        return;
+      }
+      if (!target) {
+        alert("Hedef seçiniz.");
+        return;
+      }
+      if (target === "stock" && (!warehouseId || !locationId)) {
+        alert("Depo hedefi için depo ve lokasyon seçiniz.");
+        return;
+      }
 
-      if (!master_id) { alert("Seçili tarifin master bilgisi bulunamadı."); return; }
+      const master_id = selectedRecipeMasterId; // Ürün master’ı = tarif master’ı
+      if (!master_id) {
+        alert("Seçili tarifin master bilgisi bulunamadı.");
+        return;
+      }
 
-      const compPayload = components.map(c => {
+      const compPayload = components.map((c) => {
         if (!c.stock) throw new Error("Eksik component seçimi var.");
         return {
           component_id: c.stock.id,
@@ -365,16 +417,15 @@ export default function ProductAssemble() {
         };
       });
 
-      const payload: any = {
-        product: {
-          master_id,
-          // barcode YOK — depoya alma/etiketleme aşamasında zorunlu olacak
-          target,
-          warehouse_id: target === "stock" ? Number(warehouseId) : undefined,
-          location_id:  target === "stock" ? Number(locationId)  : undefined,
-        },
-        components: compPayload,
+      const product: any = {
+        master_id,
+        target,
+        warehouse_id: target === "stock" ? Number(warehouseId) : undefined,
+        location_id: target === "stock" ? Number(locationId) : undefined,
       };
+      if (bimeksCode.trim()) product.bimeks_code = bimeksCode.trim();
+
+      const payload = { product, components: compPayload };
 
       const { data } = await api.post("/products/assemble", payload);
       const newId = data?.product?.id ?? data?.id ?? "?";
@@ -388,6 +439,7 @@ export default function ProductAssemble() {
       setComponents([]);
       setChoices({});
       setSearch({});
+      setBimeksCode("");
     } catch (err: any) {
       const msg = err?.response?.data?.message || err?.message || "Hata";
       alert(`Kaydetme hatası: ${msg}`);
@@ -399,9 +451,18 @@ export default function ProductAssemble() {
   const handleSaveRecipe = async () => {
     try {
       if (recipeMode !== "new") return;
-      if (!newRecipeName.trim()) { alert("Tarif adı zorunlu."); return; }
-      if (!productCategoryId || !bantTypeId) { alert("PRODUCT/BANT kimliği bulunamadı."); return; }
-      if (!components.length) { alert("Tarife eklenecek component yok."); return; }
+      if (!newRecipeName.trim()) {
+        alert("Tarif adı zorunlu.");
+        return;
+      }
+      if (!productCategoryId || !bantTypeId) {
+        alert("PRODUCT/BANT kimliği bulunamadı.");
+        return;
+      }
+      if (!components.length) {
+        alert("Tarife eklenecek component yok.");
+        return;
+      }
 
       const totals = new Map<number, number>();
       for (const c of components) {
@@ -411,7 +472,10 @@ export default function ProductAssemble() {
         const prev = totals.get(sid) || 0;
         totals.set(sid, prev + add);
       }
-      if (totals.size === 0) { alert("Hiçbir satırda geçerli component seçimi yok."); return; }
+      if (totals.size === 0) {
+        alert("Hiçbir satırda geçerli component seçimi yok.");
+        return;
+      }
 
       const items = Array.from(totals.entries()).map(([component_master_id, quantity]) => ({
         component_master_id,
@@ -427,7 +491,7 @@ export default function ProductAssemble() {
         items,
       };
 
-      const { data } = await api.post("/recipes", payload);
+      const { data } = await api.post(RECIPES_BASE, payload);
       const rid = data?.recipe_id || "";
       const mid = data?.master_id || null;
 
@@ -457,23 +521,13 @@ export default function ProductAssemble() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div className="md:col-span-2">
             <Label>Tarif Modu</Label>
-            <Select
-              options={recipeModeOptions}
-              value={recipeMode}
-              onChange={handleChangeRecipeMode}
-              placeholder="Seçiniz"
-            />
+            <Select options={recipeModeOptions} value={recipeMode} onChange={handleChangeRecipeMode} placeholder="Seçiniz" />
           </div>
 
           {recipeMode === "existing" && (
             <div className="md:col-span-2">
               <Label>Tarif</Label>
-              <Select
-                options={recipeSelectOptions}
-                value={recipeId}
-                onChange={handleSelectRecipe}
-                placeholder="Tarif seçiniz"
-              />
+              <Select options={recipeSelectOptions} value={recipeId} onChange={handleSelectRecipe} placeholder="Tarif seçiniz" />
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                 Tarif seçildiğinde satırlar beklenen komponent master’ları ve miktarlarıyla gelir.
               </p>
@@ -482,7 +536,9 @@ export default function ProductAssemble() {
 
           {recipeMode === "new" && (
             <div className="md:col-span-2">
-              <Label>Yeni Tarif Adı <span className="text-rose-600">*</span></Label>
+              <Label>
+                Yeni Tarif Adı <span className="text-rose-600">*</span>
+              </Label>
               <Input
                 value={newRecipeName}
                 onChange={(e) => {
@@ -508,7 +564,7 @@ export default function ProductAssemble() {
             const allRows = choices[c.key] ?? [];
 
             const visibleRows = allRows
-              .filter(r => r.id === selected?.id || !selectedIds.includes(r.id))
+              .filter((r) => r.id === selected?.id || !selectedIds.includes(r.id))
               .sort((a, b) => {
                 const em = c.expectedMasterId;
                 if (!em) return 0;
@@ -536,8 +592,8 @@ export default function ProductAssemble() {
                       {selected
                         ? `${selected.barcode} — ${selected.name}`
                         : c.expectedLabel
-                          ? `Beklenen: ${c.expectedLabel} (seçiniz)`
-                          : "Component seçin"}
+                        ? `Beklenen: ${c.expectedLabel} (seçiniz)`
+                        : "Component seçin"}
                     </span>
                     <span className="ml-3 opacity-60">▾</span>
                   </div>
@@ -618,14 +674,67 @@ export default function ProductAssemble() {
 
                   {selected && (
                     <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                      Birim: {selected.unit} • Mevcut: {selected.quantity} • {selected.warehouse.name} /{" "}
-                      {selected.location.name}
+                      {(() => {
+                        const totalRaw = masterTotals[selected.master_id]; // FE cache'ten toplam
+                        const hasTotal = typeof totalRaw === "number";
+
+                        // üst satırlarda aynı master için kullanılan toplam
+                        const usedBefore = components
+                          .slice(0, idx)
+                          .filter((x) => x.stock?.master_id === selected.master_id)
+                          .reduce((sum, x) => {
+                            if (!x.stock) return sum;
+                            const u = x.stock.unit === "EA" ? 1 : Number(x.consumeQty || 0);
+                            return sum + (Number.isFinite(u) && u > 0 ? u : 0);
+                          }, 0);
+
+                        // bu satırda kullanılacak
+                        const usedCurrent =
+                          selected.unit === "EA"
+                            ? 1
+                            : Number.isFinite(Number(c.consumeQty)) && Number(c.consumeQty) > 0
+                            ? Number(c.consumeQty)
+                            : null;
+
+                        // ayarlanmış toplam = totalRaw - usedBefore
+                        const totalAdj = hasTotal ? Math.max(0, totalRaw - usedBefore) : null;
+
+                        // kalan = totalAdj - usedCurrent
+                        const remaining =
+                          totalAdj !== null && usedCurrent !== null ? Math.max(0, totalAdj - usedCurrent) : null;
+
+                        return (
+                          <>
+                            <span>
+                              Toplam:{" "}
+                              <span className={toneClass(Number(totalAdj ?? NaN), true)}>
+                                {totalAdj !== null ? totalAdj : "…"}
+                              </span>{" "}
+                              {unitLabel(selected.unit)}
+                            </span>
+                            {"  •  "}
+                            <span>
+                              {selected.warehouse.name} / {selected.location.name}
+                            </span>
+                            {"  •  "}
+                            <span>
+                              Kullanım sonrası kalan{" "}
+                              {remaining !== null ? (
+                                <>
+                                  <span className={toneClass(remaining, true)}>{remaining}</span> {unitLabel(selected.unit)}
+                                </>
+                              ) : (
+                                "—"
+                              )}
+                            </span>
+                          </>
+                        );
+                      })()}
                     </div>
                   )}
+
                   {!selected && c.expectedLabel && (
-                    <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                      Beklenen: {c.expectedLabel}
-                    </div>
+                    <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">Beklenen: {c.expectedLabel}</div>
                   )}
                 </div>
 
@@ -640,7 +749,9 @@ export default function ProductAssemble() {
                       max={String(selected?.quantity ?? 0)}
                       value={c.consumeQty ?? ""}
                       onChange={(e) => setConsumeQty(c.key, e.target.value)}
-                      placeholder={selected ? `0 - ${selected.quantity}` : (c.expectedLabel ? `Öneri: ${c.consumeQty ?? ""}` : "")}
+                      placeholder={
+                        selected ? `0 - ${selected.quantity}` : c.expectedLabel ? `Öneri: ${c.consumeQty ?? ""}` : ""
+                      }
                       disabled={!selected && !c.expectedMasterId}
                     />
                   )}
@@ -675,11 +786,7 @@ export default function ProductAssemble() {
         {/* ALT BUTONLAR — Tarifi Kaydet + Devam Et */}
         <div className="mt-6 flex flex-wrap items-center gap-3">
           {recipeMode === "new" && (
-            <Button
-              variant="primary"
-              onClick={handleSaveRecipe}
-              disabled={!newRecipeName.trim() || components.length === 0}
-            >
+            <Button variant="primary" onClick={handleSaveRecipe} disabled={!newRecipeName.trim() || components.length === 0}>
               Tarifi Kaydet
             </Button>
           )}
@@ -702,52 +809,50 @@ export default function ProductAssemble() {
       {/* HEDEF (Barkodsuz) */}
       {showFinalize && (
         <ComponentCard title="Hedef">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
             <div>
               <Label>Hedef</Label>
-              <Select
-                options={targetOptions}
-                value={target}
-                onChange={handleChangeTarget}
-                placeholder="Seçiniz"
-              />
+              <Select options={targetOptions} value={target} onChange={handleChangeTarget} placeholder="Seçiniz" />
             </div>
 
             <div>
-              <Label>Depo</Label>
-              <Select
-                options={[
-                  { value: "", label: "Seçiniz", disabled: true },
-                  ...warehouses.map((w) => ({ value: String(w.id), label: w.name })),
-                ]}
-                value={warehouseId}
-                onChange={async (v: string) => {
-                  setWarehouseId(v);
-                  setLocationId("");
-                  await ensureLocations(v);
-                }}
-                placeholder="Seçiniz"
-                disabled={target !== "stock"}
-              />
+              <Label>Bimeks Kodu</Label>
+              <Input value={bimeksCode} onChange={(e) => setBimeksCode(e.target.value)} placeholder="Örn: BMK0001" />
             </div>
 
-            <div>
-              <Label>Lokasyon</Label>
-              <Select
-                options={[
-                  { value: "", label: "Seçiniz", disabled: true },
-                  ...(
-                    warehouseId
-                      ? (locationsByWarehouse[Number(warehouseId)] || [])
-                      : []
-                  ).map((l) => ({ value: String(l.id), label: l.name })),
-                ]}
-                value={locationId}
-                onChange={(v: string) => setLocationId(v)}
-                placeholder="Seçiniz"
-                disabled={target !== "stock" || !warehouseId}
-              />
-            </div>
+            {target === "stock" && (
+              <>
+                <div>
+                  <Label>Depo</Label>
+                  <Select
+                    options={[{ value: "", label: "Seçiniz", disabled: true }, ...warehouses.map((w) => ({ value: String(w.id), label: w.name }))]}
+                    value={warehouseId}
+                    onChange={async (v: string) => {
+                      setWarehouseId(v);
+                      setLocationId("");
+                      await ensureLocations(v);
+                    }}
+                    placeholder="Seçiniz"
+                  />
+                </div>
+
+                <div>
+                  <Label>Lokasyon</Label>
+                  <Select
+                    options={[
+                      { value: "", label: "Seçiniz", disabled: true },
+                      ...(warehouseId ? locationsByWarehouse[Number(warehouseId)] || [] : []).map((l) => ({
+                        value: String(l.id),
+                        label: l.name,
+                      })),
+                    ]}
+                    value={locationId}
+                    onChange={(v: string) => setLocationId(v)}
+                    placeholder="Seçiniz"
+                  />
+                </div>
+              </>
+            )}
           </div>
 
           <div className="mt-6 flex items-center justify-end gap-3">
