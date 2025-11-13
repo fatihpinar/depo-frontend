@@ -198,7 +198,6 @@ export default function StockReceiptApprovalPage() {
     if (!hasW && !hasH) return "—";
     return `${hasW ? nf.format(w!) : "—"} × ${hasH ? nf.format(h!) : "—"} metre`;
   };
-  const labelOf = (r:PendingRow) => `${r.master?.display_label || "(Tanım Yok)"} #${r.id}`;
 
   const GRID_COLS = "grid-cols-[44px_minmax(380px,2fr)_minmax(260px,1.2fr)_96px_120px_180px_200px]";
 

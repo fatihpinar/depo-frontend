@@ -1,15 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useSidebar } from "../context/SidebarContext";
 import { ThemeToggleButton } from "../components/common/ThemeToggleButton";
 import UserDropdown, { Me } from "../components/header/UserDropdown";
-import { clearAuth } from "../components/auth/storage";
 import api from "../services/api";
 
 const AppHeader: React.FC = () => {
   const [isApplicationMenuOpen, setApplicationMenuOpen] = useState(false);
   const [me, setMe] = useState<Me | null>(null); // 👈 me state
-  const navigate = useNavigate();
   const { isMobileOpen, toggleSidebar, toggleMobileSidebar } = useSidebar();
 
   // /auth/me → kullanıcı bilgisi
@@ -27,11 +25,6 @@ const AppHeader: React.FC = () => {
       mounted = false;
     };
   }, []);
-
-  const handleLogout = () => {
-    clearAuth();
-    navigate("/signin", { replace: true });
-  };
 
   const handleToggle = () => {
     if (window.innerWidth >= 1024) {
