@@ -1,4 +1,5 @@
 name: Deploy Frontend
+
 on:
   push:
     branches: [ main ]
@@ -6,6 +7,7 @@ on:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -14,37 +16,32 @@ jobs:
           node-version: 20
           cache: 'npm'
 
-      - run: npm ci
-      - run: npm run build
+      - name: Install deps
+        run: npm ci
+
+      - name: Build
+        run: npm run build
 
       - name: Pack dist
         run: tar -czf dist.tar.gz -C dist .
 
-      - name: Prepare release dir on server
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          script: mkdir -p /var/www/depo-frontend/releases/${{ github.sha }}
-
-      - name: Upload dist
+      - name: Upload dist to server
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           source: "dist.tar.gz"
-          target: "/var/www/depo-frontend/releases/${{ github.sha }}/"
+          target: "/srv/depo-frontend/"
 
-      - name: Activate release
+      - name: Activate new release
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           script: |
-            /usr/local/bin/deploy-depo-frontend.sh ${{ github.sha }}
+            sudo /usr/local/bin/deploy-depo-frontend.sh
             sudo systemctl reload nginx
           timeout: 60s
           command_timeout: 5m
