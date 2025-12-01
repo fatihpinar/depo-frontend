@@ -6,15 +6,16 @@ import { getAuth, clearAuth } from "../components/auth/storage";
 const isProd = import.meta.env.MODE === "production";
 
 const rawBase = isProd
-  ? "/api"
-  : import.meta.env.VITE_API_URL || "http://localhost:3000/api";
+  ? "/api" // 👈 canlı sunucuda her zaman bu
+  : import.meta.env.VITE_API_URL || "http://localhost:3000/api"; // local dev
 
-// Sonda gereksiz / olmasın
+// Sonda gereksiz / olmasın ("/api///" → "/api")
 const baseURL = rawBase.replace(/\/+$/, "");
 
 const api = axios.create({
   baseURL,
   headers: { "Content-Type": "application/json" },
+  // timeout: 20000,
 });
 
 // ---- Request: Authorization ekle ----
