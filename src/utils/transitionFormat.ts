@@ -56,17 +56,29 @@ function qtyText(delta?: number | null, unit?: string | null): string | null {
 }
 
 function titleFor(t: TransitionRow): string {
+  const meta = t.meta || {};
+
+  // 🔹 Özel kural: Component çıkışı ekranında hedef "Satış" ise
+  // BE meta.target = "sale" gönderiyor → başlık "Satış" olsun.
+  if (t.action === "CONSUME" && meta.target === "sale") {
+    return "Satış";
+  }
+
+  // 🔹 MOVE her zaman "Yer değişti" kalsın
   if (t.action === "MOVE") return ACTION_LABEL_TR.MOVE;
 
-  if (t.action === "APPROVE" || t.action === "STATUS_CHANGE") {
-    if (isNonEmpty(t.to_status_label)) return String(t.to_status_label);
-    if (t.to_status_id && STATUS_LABEL_FALLBACK_TR[t.to_status_id]) {
-      return STATUS_LABEL_FALLBACK_TR[t.to_status_id];
-    }
-    return ACTION_LABEL_TR[t.action] || String(t.action);
+  // 🔹 Önce statü label / fallback
+  if (isNonEmpty(t.to_status_label)) {
+    return String(t.to_status_label);
   }
+  if (t.to_status_id && STATUS_LABEL_FALLBACK_TR[t.to_status_id]) {
+    return STATUS_LABEL_FALLBACK_TR[t.to_status_id];
+  }
+
+  // 🔹 Aksi halde aksiyon sözlüğüne düş
   return ACTION_LABEL_TR[t.action] || String(t.action);
 }
+
 
 function humanDetailsTR(t: TransitionRow): string[] {
   const out: string[] = [];

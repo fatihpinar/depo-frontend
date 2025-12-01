@@ -20,7 +20,15 @@ import {
 /* ---------- Lookups ---------- */
 type Warehouse = { id: number; name: string };
 type Location = { id: number; name: string; warehouse_id: number };
-type MasterMini = { id: number; name?: string | null; display_label?: string | null };
+type MasterMini = {
+  id: number;
+  name?: string | null;
+  display_label?: string | null;
+  bimeks_product_name?: string | null; // 👈 yeni
+  bimeks_code?: string | null;
+  length_unit?: string | null;
+};
+
 
 /* ---------- Status ---------- */
 type StatusOpt = { value: number; label: string };
@@ -47,11 +55,32 @@ export default function ComponentDetailPage() {
   const [invoiceNo, setInvoiceNo] = useState("");
   const [notes, setNotes] = useState("");
 
-  const [unit, setUnit] = useState<"EA" | "M" | "KG" | string>("");
-  const [quantity, setQuantity] = useState<number>(0);
   const [width, setWidth] = useState<number | "">("");
   const [height, setHeight] = useState<number | "">("");
-  const isEA = unit === "EA";
+  const [unit, setUnit] = useState<"EA" | "M" | "KG" | string>("");
+  const [quantity, setQuantity] = useState<number>(0);
+  const [area, setArea] = useState<number | "">(""); // 👈 yeni
+  // en / boy değişince alanı canlı hesapla
+  useEffect(() => {
+    if (width === "" || height === "") {
+      setArea("");
+      return;
+    }
+
+    const w = Number(width);
+    const h = Number(height);
+
+    if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+      setArea("");
+      return;
+    }
+
+    setArea(w * h);
+  }, [width, height]);
+
+    const [masterCode, setMasterCode] = useState<string>(""); // 👈 YENİ
+    const [masterUnitLabel, setMasterUnitLabel] = useState<string>(""); // 👈 yeni
+
 
   /* ------ seçenekler ------ */
   const warehouseOptions = useMemo(
@@ -63,9 +92,20 @@ export default function ComponentDetailPage() {
     return [{ value: "", label: "Seçiniz", disabled: true }, ...list.map((l) => ({ value: String(l.id), label: l.name }))];
   }, [warehouseId, locationsByWarehouse]);
   const masterOptions = useMemo(
-    () => [{ value: "", label: "Seçiniz", disabled: true }, ...masters.map((m) => ({ value: String(m.id), label: m.display_label || m.name || `#${m.id}` }))],
+    () => [
+      { value: "", label: "Seçiniz", disabled: true },
+      ...masters.map((m) => ({
+        value: String(m.id),
+        label:
+          m.display_label ||
+          m.bimeks_product_name || // 👈 asıl kaynak
+          m.name ||
+          `#${m.id}`,
+      })),
+    ],
     [masters]
   );
+
 
   /* ------ helpers ------ */
   const ensureLocations = async (wh: number | "") => {
@@ -129,9 +169,42 @@ export default function ComponentDetailPage() {
         setInvoiceNo(data.invoice_no || "");
         setNotes(data.notes || "");
         setUnit(data.unit || "");
+
+        // width / height sayıya çevrilmiş hali
+        const wNum = data.width !== null && data.width !== undefined
+          ? Number(data.width)
+          : null;
+        const hNum = data.height !== null && data.height !== undefined
+          ? Number(data.height)
+          : null;
+
+        setWidth(wNum !== null && !Number.isNaN(wNum) ? wNum : "");
+        setHeight(hNum !== null && !Number.isNaN(hNum) ? hNum : "");
+
+        // area (DB'de varsa onu, yoksa w*h)
+        const areaNum =
+          data.area !== null && data.area !== undefined
+            ? Number(data.area)
+            : wNum !== null && hNum !== null
+              ? wNum * hNum
+              : null;
+
+        setArea(
+          areaNum !== null && !Number.isNaN(areaNum) ? areaNum : ""
+        );
+
+        // miktar state’i şimdilik sadece referans, ekrandan değiştirmiyoruz
         setQuantity(Number(data.quantity || 0));
-        setWidth(typeof data.width === "number" ? data.width : data.width ?? "");
-        setHeight(typeof data.height === "number" ? data.height : data.height ?? "");
+
+        setMasterCode(data.master?.bimeks_code || "");
+
+        const lu = data.master?.length_unit || null;
+        setMasterUnitLabel(
+          lu === "m" ? "Metre" :
+            lu === "um" ? "Mikron" :
+              lu || ""
+        );
+
       } catch (err) {
         console.error("component details load error:", err);
         alert("Detay yüklenemedi.");
@@ -145,25 +218,49 @@ export default function ComponentDetailPage() {
   /* ------ Kaydet (component) ------ */
   const handleSave = async () => {
     try {
-      if (Number(statusId) === 1) {
-        if (!warehouseId || !locationId) {
-          alert("Durum 'Depoda' iken Depo ve Lokasyon seçimi zorunludur.");
-          return;
-        }
-      }
+    // 🔴 En / boy zorunlu
+    if (width === "" || height === "") {
+      alert("En ve boy alanları zorunludur.");
+      return;
+    }
 
-      const payload: any = {
-        barcode,
-        master_id: masterId ? Number(masterId) : undefined,
-        quantity: isEA ? 1 : Number(quantity || 0),
-        status_id: statusId ? Number(statusId) : undefined,
-        warehouse_id: warehouseId ? Number(warehouseId) : (Number(statusId) === 1 ? Number(warehouseId) : null),
-        location_id:  locationId  ? Number(locationId)  : (Number(statusId) === 1 ? Number(locationId)  : null),
-        invoice_no: invoiceNo.trim() ? invoiceNo.trim() : null,
-        notes: notes || null,
-        width:  width  === "" ? null : Number(width),
-        height: height === "" ? null : Number(height),
-      };
+    const w = Number(width);
+    const h = Number(height);
+
+    if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+      alert("En ve boy 0'dan büyük sayılar olmalıdır.");
+      return;
+    }
+
+    if (Number(statusId) === 1) {
+      if (!warehouseId || !locationId) {
+        alert("Durum 'Depoda' iken Depo ve Lokasyon seçimi zorunludur.");
+        return;
+      }
+    }
+
+    const payload: any = {
+      barcode,
+      master_id: masterId ? Number(masterId) : undefined,
+      status_id: statusId ? Number(statusId) : undefined,
+      warehouse_id: warehouseId
+        ? Number(warehouseId)
+        : Number(statusId) === 1
+        ? Number(warehouseId)
+        : null,
+      location_id: locationId
+        ? Number(locationId)
+        : Number(statusId) === 1
+        ? Number(locationId)
+        : null,
+      invoice_no: invoiceNo.trim() ? invoiceNo.trim() : null,
+      notes: notes || null,
+      width: w,
+      height: h,
+      area: w * h, // 🔴 alanı da gönder
+    };
+
+
 
       await api.put(`/components/${id}`, payload);
       alert("Komponent güncellendi.");
@@ -203,13 +300,22 @@ export default function ComponentDetailPage() {
     setTlItems([]);
     setTlOffset(0);
     setTlTotal(0);
-    fetchTransitions(true).catch(() => {});
+    fetchTransitions(true).catch(() => { });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   // tarih biçimleyici
   const fmt = (d?: string) => (d ? new Date(d).toLocaleString() : "");
   const tlHasMore = tlItems.length < tlTotal;
+
+  const currentMaster = masters.find((m) => m.id === masterId);
+  const masterDisplay =
+    currentMaster
+      ? currentMaster.display_label ||
+      currentMaster.bimeks_product_name ||
+      currentMaster.name ||
+      ""
+      : "";
 
   return (
     <div className="space-y-6">
@@ -225,53 +331,22 @@ export default function ComponentDetailPage() {
           <ComponentCard title="Komponent">
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div>
+                <Label>Tanım (Master)</Label>
+                <Input value={masterDisplay} disabled />
+              </div>
+
+              <div>
+                <Label>Bimeks Kodu (Master)</Label>
+                <Input
+                  value={masterCode}
+                  disabled
+                  placeholder="Seçilen master'ın Bimeks kodu"
+                />
+              </div>
+
+              <div>
                 <Label>Barkod</Label>
                 <Input value={barcode} onChange={(e) => setBarcode(e.target.value)} />
-              </div>
-
-              <div>
-                <Label>Tanım (Master)</Label>
-                <Select
-                  options={masterOptions}
-                  value={masterId ? String(masterId) : ""}
-                  onChange={(v: string) => setMasterId(v ? Number(v) : "")}
-                  placeholder="Seçiniz"
-                />
-              </div>
-
-              <div>
-                <Label>Ölçü Birimi</Label>
-                <Input value={unit || ""} disabled />
-              </div>
-
-              <div>
-                <Label>Miktar</Label>
-                <Input
-                  type="number"
-                  value={isEA ? 1 : quantity}
-                  onChange={(e) => setQuantity(Number(e.target.value || 0))}
-                  disabled={isEA}
-                />
-              </div>
-
-              <div>
-                <Label>En</Label>
-                <Input
-                  type="number"
-                  value={width === "" ? "" : String(width)}
-                  onChange={(e) => setWidth(e.target.value === "" ? "" : Number(e.target.value))}
-                  placeholder="Opsiyonel"
-                />
-              </div>
-
-              <div>
-                <Label>Boy</Label>
-                <Input
-                  type="number"
-                  value={height === "" ? "" : String(height)}
-                  onChange={(e) => setHeight(e.target.value === "" ? "" : Number(e.target.value))}
-                  placeholder="Opsiyonel"
-                />
               </div>
 
               <div>
@@ -280,6 +355,44 @@ export default function ComponentDetailPage() {
                   options={[{ value: "", label: "Seçiniz", disabled: true }, ...statuses.map((s) => ({ value: String(s.value), label: s.label }))]}
                   value={statusId ? String(statusId) : ""}
                   onChange={(v: string) => setStatusId(v ? Number(v) : "")}
+                />
+              </div>
+
+              <div>
+                <Label>En <span className="text-red-500">*</span></Label>
+                <Input
+                  type="number"
+                  value={width === "" ? "" : String(width)}
+                  onChange={(e) =>
+                    setWidth(e.target.value === "" ? "" : Number(e.target.value))
+                  }
+                  placeholder="Zorunlu"
+                />
+              </div>
+
+              <div>
+                <Label>Boy <span className="text-red-500">*</span></Label>
+                <Input
+                  type="number"
+                  value={height === "" ? "" : String(height)}
+                  onChange={(e) =>
+                    setHeight(e.target.value === "" ? "" : Number(e.target.value))
+                  }
+                  placeholder="Zorunlu"
+                />
+              </div>
+
+              <div>
+                <Label>Ölçü Birimi</Label>
+                <Input value={masterUnitLabel} disabled />
+              </div>
+
+              <div>
+                <Label>Alan (m²)</Label>
+                <Input
+                  type="number"
+                  value={area === "" ? "" : String(area)}
+                  disabled
                 />
               </div>
 
@@ -307,7 +420,7 @@ export default function ComponentDetailPage() {
                   placeholder="Seçiniz"
                 />
               </div>
-              
+
               <div>
                 <Label>Fatura No</Label>
                 <Input

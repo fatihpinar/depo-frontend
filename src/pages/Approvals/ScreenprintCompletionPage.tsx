@@ -1,4 +1,3 @@
-// src/pages/Approvals/ScreenprintCompletionPage.tsx
 import { useEffect, useMemo, useState } from "react";
 import api from "../../services/api";
 
@@ -17,7 +16,7 @@ import { Link } from "react-router-dom";
 import BarcodeScannerModal from "../../components/scan/BarcodeScannerModal";
 
 type Warehouse = { id: number; name: string };
-type Location  = { id: number; name: string; warehouse_id: number };
+type Location = { id: number; name: string; warehouse_id: number };
 
 type PendingRow = {
   id: number;
@@ -27,53 +26,74 @@ type PendingRow = {
   quantity?: number | null;
   width?: number | null;
   height?: number | null;
+  area?: number | null;
   master?: { id: number; display_label?: string | null } | null;
   warehouse_id?: number | null;
   location_id?: number | null;
 };
 
-const UNIT_WORD: Record<string,string> = { EA: "Ad.", M: "Metre", KG: "Gram" };
 const nf = new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 3 });
 const SCOPE = "screenprint" as const;
 
-const normalize = (v: string | null | undefined) => String(v ?? "").trim().toUpperCase();
+const normalize = (v: string | null | undefined) =>
+  String(v ?? "").trim().toUpperCase();
 
 export default function ScreenprintCompletionPage() {
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [locationsByWarehouse, setLocationsByWarehouse] = useState<Record<number, Location[]>>({});
+  const [locationsByWarehouse, setLocationsByWarehouse] = useState<
+    Record<number, Location[]>
+  >({});
   const [rows, setRows] = useState<PendingRow[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState<string|null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   /* selection */
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const keyOf = (r: PendingRow) => `${r.kind}:${r.id}`;
   const isSelected = (r: PendingRow) => selectedIds.has(keyOf(r));
   const toggleOne = (r: PendingRow) =>
-    setSelectedIds(prev => { const n=new Set(prev); const k=keyOf(r); n.has(k)?n.delete(k):n.add(k); return n; });
-  const allSelected = rows.length>0 && rows.every(isSelected);
-  const toggleAll   = (checked:boolean)=> setSelectedIds(checked? new Set(rows.map(keyOf)) : new Set());
+    setSelectedIds((prev) => {
+      const n = new Set(prev);
+      const k = keyOf(r);
+      n.has(k) ? n.delete(k) : n.add(k);
+      return n;
+    });
+  const allSelected = rows.length > 0 && rows.every(isSelected);
+  const toggleAll = (checked: boolean) =>
+    setSelectedIds(checked ? new Set(rows.map(keyOf)) : new Set());
 
   /* globals */
   const [globalWarehouse, setGlobalWarehouse] = useState("");
-  const [globalLocation,  setGlobalLocation]  = useState("");
+  const [globalLocation, setGlobalLocation] = useState("");
 
   const warehouseOptions = useMemo(
-    () => [{ value:"", label:"Seçiniz", disabled:true }, ...warehouses.map(w => ({ value:String(w.id), label:w.name }))],
+    () => [
+      { value: "", label: "Seçiniz", disabled: true },
+      ...warehouses.map((w) => ({ value: String(w.id), label: w.name })),
+    ],
     [warehouses]
   );
+
   const globalLocationOptions = useMemo(() => {
-    const list = globalWarehouse ? (locationsByWarehouse[Number(globalWarehouse)] || []) : [];
-    return [{ value:"", label:"Seçiniz", disabled:true }, ...list.map(l => ({ value:String(l.id), label:l.name }))];
+    const list = globalWarehouse
+      ? locationsByWarehouse[Number(globalWarehouse)] || []
+      : [];
+    return [
+      { value: "", label: "Seçiniz", disabled: true },
+      ...list.map((l) => ({ value: String(l.id), label: l.name })),
+    ];
   }, [globalWarehouse, locationsByWarehouse]);
 
   /* helpers */
-  const ensureLocations = async (warehouseId: string|number) => {
-    const id = Number(warehouseId); if(!id) return [];
+  const ensureLocations = async (warehouseId: string | number) => {
+    const id = Number(warehouseId);
+    if (!id) return [];
     if (locationsByWarehouse[id]) return locationsByWarehouse[id];
-    const { data } = await api.get("/lookups/locations", { params:{ warehouseId:id }});
+    const { data } = await api.get("/lookups/locations", {
+      params: { warehouseId: id },
+    });
     const list: Location[] = data || [];
-    setLocationsByWarehouse(prev => ({ ...prev, [id]: list }));
+    setLocationsByWarehouse((prev) => ({ ...prev, [id]: list }));
     return list;
   };
 
@@ -87,8 +107,8 @@ export default function ScreenprintCompletionPage() {
   const closeScanner = () => setScanOpen(false);
   const handleScanResult = (text: string) => {
     if (!scanTargetKey) return;
-    setRows(prev =>
-      prev.map(x => keyOf(x) === scanTargetKey ? ({ ...x, barcode: text }) : x)
+    setRows((prev) =>
+      prev.map((x) => (keyOf(x) === scanTargetKey ? { ...x, barcode: text } : x))
     );
   };
 
@@ -98,31 +118,43 @@ export default function ScreenprintCompletionPage() {
       try {
         const [wh, pending] = await Promise.all([
           api.get("/lookups/warehouses"),
-          api.get("/approvals/pending", { params:{ scope: SCOPE } }),
+          api.get("/approvals/pending", { params: { scope: SCOPE } }),
         ]);
         setWarehouses(wh.data || []);
 
         const toNum = (v: any): number | null =>
-          (v === "" || v === null || v === undefined) ? null : Number(v);
+          v === "" || v === null || v === undefined ? null : Number(v);
 
         const raw: any[] = pending.data || [];
-        const items: PendingRow[] = raw.map((r) => ({
-          id: r.id,
-          kind: r.kind,
-          barcode: r.barcode || "",
-          unit: r.unit ?? null,
-          quantity: toNum(r.quantity),
-          width: toNum(r.width),
-          height: toNum(r.height),
-          master: r.master ?? null,
-          warehouse_id: toNum(r.warehouse_id),
-          location_id: toNum(r.location_id),
-        }));
+        const items: PendingRow[] = raw.map((r) => {
+          const width = toNum(r.width);
+          const height = toNum(r.height);
+          const areaFromApi = toNum(r.area);
+          const areaComputed =
+            width !== null && height !== null ? width * height : null;
+
+          return {
+            id: r.id,
+            kind: r.kind,
+            barcode: r.barcode || "",
+            unit: r.unit ?? null,
+            quantity: toNum(r.quantity),
+            width,
+            height,
+            area: areaFromApi ?? areaComputed,
+            master: r.master ?? null,
+            warehouse_id: toNum(r.warehouse_id),
+            location_id: toNum(r.location_id),
+          };
+        });
+
         setRows(items);
 
-        const uniqWh = Array.from(new Set(items.map(r => r.warehouse_id).filter(Boolean))) as number[];
-        await Promise.all(uniqWh.map(id => ensureLocations(id)));
-      } catch (e:any) {
+        const uniqWh = Array.from(
+          new Set(items.map((r) => r.warehouse_id).filter(Boolean))
+        ) as number[];
+        await Promise.all(uniqWh.map((id) => ensureLocations(id)));
+      } catch (e: any) {
         console.error(e);
         setError("Kayıtlar yüklenemedi.");
       }
@@ -130,13 +162,20 @@ export default function ScreenprintCompletionPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const applyTo = (scope:"selected"|"all") => {
-    if(!globalWarehouse || !globalLocation) return;
-    const targets = scope==="selected" ? rows.filter(isSelected) : rows;
-    setRows(prev => prev.map(r => targets.find(t => t.id===r.id && t.kind===r.kind)
-      ? { ...r, warehouse_id:Number(globalWarehouse), location_id:Number(globalLocation) }
-      : r
-    ));
+  const applyTo = (scope: "selected" | "all") => {
+    if (!globalWarehouse || !globalLocation) return;
+    const targets = scope === "selected" ? rows.filter(isSelected) : rows;
+    setRows((prev) =>
+      prev.map((r) =>
+        targets.find((t) => t.id === r.id && t.kind === r.kind)
+          ? {
+              ...r,
+              warehouse_id: Number(globalWarehouse),
+              location_id: Number(globalLocation),
+            }
+          : r
+      )
+    );
   };
 
   const handleApproveSelected = async () => {
@@ -144,13 +183,20 @@ export default function ScreenprintCompletionPage() {
       const selectedRows = rows.filter(isSelected);
       if (!selectedRows.length) return alert("Önce satır seçiniz.");
 
-      const missingDepot = selectedRows.filter(r => !r.warehouse_id || !r.location_id);
+      const missingDepot = selectedRows.filter(
+        (r) => !r.warehouse_id || !r.location_id
+      );
       if (missingDepot.length) {
-        const ex = (missingDepot[0].master?.display_label) ?? (missingDepot[0].barcode) ?? "(tanım yok)";
-        return alert(`Bazı seçili satırlarda depo/lokasyon eksik. Örn: ${ex}`);
+        const ex =
+          missingDepot[0].master?.display_label ??
+          missingDepot[0].barcode ??
+          "(tanım yok)";
+        return alert(
+          `Bazı seçili satırlarda depo/lokasyon eksik. Örn: ${ex}`
+        );
       }
 
-      const badBarcode = selectedRows.find(r => {
+      const badBarcode = selectedRows.find((r) => {
         const code = normalize(r.barcode);
         if (!code) return true;
         const re = r.kind === "component" ? /^C\d{8}$/ : /^P\d{8}$/;
@@ -158,13 +204,15 @@ export default function ScreenprintCompletionPage() {
       });
       if (badBarcode) {
         const name = badBarcode.master?.display_label ?? "(tanım yok)";
-        return alert(`Barkod eksik ya da format hatalı. Örn satır: ${name} #${badBarcode.id}`);
+        return alert(
+          `Barkod eksik ya da format hatalı. Örn satır: ${name} #${badBarcode.id}`
+        );
       }
 
       setLoading(true);
       await api.post("/approvals/approve", {
         scope: SCOPE,
-        items: selectedRows.map(r => ({
+        items: selectedRows.map((r) => ({
           id: r.id,
           kind: r.kind,
           warehouse_id: r.warehouse_id,
@@ -174,37 +222,36 @@ export default function ScreenprintCompletionPage() {
       });
 
       const ok = new Set(selectedRows.map(keyOf));
-      setRows(prev => prev.filter(r => !ok.has(keyOf(r))));
+      setRows((prev) => prev.filter((r) => !ok.has(keyOf(r))));
       setSelectedIds(new Set());
-      setGlobalWarehouse(""); setGlobalLocation("");
+      setGlobalWarehouse("");
+      setGlobalLocation("");
       alert("Seçili kayıtlar onaylandı ve depoya alındı.");
-    } catch (e:any) {
+    } catch (e: any) {
       console.error(e?.response?.data || e);
       alert(e?.response?.data?.message || "Onaylama sırasında hata.");
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   };
 
   /* fmt */
-  const unitOf = (r:PendingRow) => (r.unit || "EA").toUpperCase();
-  const fmtQty  = (r:PendingRow) => {
-    const u = unitOf(r);
-    const q = u === "EA" ? 1 : Number(r.quantity ?? 0);
-    if (!(q > 0)) return "—";
-    return `${nf.format(q)} ${UNIT_WORD[u] || u}`;
-  };
-  const fmtDim  = (r:PendingRow) => {
-    const w = r.width, h = r.height;
-    const hasW = typeof w === "number" && !Number.isNaN(w) && w > 0;
-    const hasH = typeof h === "number" && !Number.isNaN(h) && h > 0;
-    if (!hasW && !hasH) return "—";
-    return `${hasW ? nf.format(w!) : "—"} × ${hasH ? nf.format(h!) : "—"} metre`;
+  const fmtArea = (r: PendingRow) => {
+    const a = typeof r.area === "number" ? r.area : null;
+    if (!(a && a > 0)) return "—";
+    return `${nf.format(a)} m²`;
   };
 
-  const GRID_COLS = "grid-cols-[44px_minmax(380px,2fr)_minmax(260px,1.2fr)_96px_120px_180px_200px]";
+  // 6 kolon: [cb, Tanım, Barkod, Alan, Depo, Lokasyon]
+  const GRID_COLS =
+    "grid-cols-[44px_minmax(380px,2fr)_minmax(260px,1.2fr)_120px_180px_200px]";
 
   return (
     <div className="space-y-6">
-      <PageMeta title="Serigrafi Tamamlama" description="Pending kayıtları depoya alma" />
+      <PageMeta
+        title="Serigrafi Tamamlama"
+        description="Pending kayıtları depoya alma"
+      />
       <PageBreadcrumb pageTitle="Serigrafi Tamamlama" />
 
       <ComponentCard title="Varsayılan Depo & Lokasyon">
@@ -237,7 +284,9 @@ export default function ScreenprintCompletionPage() {
           <Button
             variant="outline"
             onClick={() => applyTo("selected")}
-            disabled={!globalWarehouse || !globalLocation || selectedIds.size === 0}
+            disabled={
+              !globalWarehouse || !globalLocation || selectedIds.size === 0
+            }
           >
             Seçilenlere Uygula
           </Button>
@@ -260,32 +309,42 @@ export default function ScreenprintCompletionPage() {
 
         <div className="mb-4 flex items-center gap-3">
           <Checkbox checked={allSelected} onChange={toggleAll} />
-          <span className="text-sm text-gray-700 dark:text-gray-300">Tümünü Seç</span>
-          <span className="ml-auto text-xs text-gray-500">Seçili: {selectedIds.size}</span>
+          <span className="text-sm text-gray-700 dark:text-gray-300">
+            Tümünü Seç
+          </span>
+          <span className="ml-auto text-xs text-gray-500">
+            Seçili: {selectedIds.size}
+          </span>
         </div>
 
         {/* DESKTOP: Table Layout */}
         <div className="hidden md:block overflow-x-auto">
-          <div className="min-w-[1100px]">
-            <div className={`grid py-2 text-xs font-medium text-gray-500 dark:text-gray-400 ${GRID_COLS}`}>
+          <div className="min-w-[900px]">
+            <div
+              className={`grid py-2 text-xs font-medium text-gray-500 dark:text-gray-400 ${GRID_COLS}`}
+            >
               <div className="px-3 text-left" />
               <div className="px-3 text-left">Tanım</div>
               <div className="px-3 text-left">Barkod</div>
-              <div className="px-3 text-left">Miktar</div>
-              <div className="px-3 text-left">En × Boy</div>
+              <div className="px-3 text-left">Alan</div>
               <div className="px-3 text-left">Depo</div>
               <div className="px-3 text-left">Lokasyon</div>
             </div>
 
             <div className="divide-y divide-gray-100 dark:divide-gray-800">
               {rows.length === 0 ? (
-                <div className="px-4 py-6 text-sm text-gray-500">Onay bekleyen kayıt yok.</div>
+                <div className="px-4 py-6 text-sm text-gray-500">
+                  Onay bekleyen kayıt yok.
+                </div>
               ) : (
                 rows.map((r) => {
                   const wh = r.warehouse_id ? String(r.warehouse_id) : "";
                   const locOpts = [
                     { value: "", label: "Seçiniz", disabled: true },
-                    ...(((wh ? locationsByWarehouse[Number(wh)] : []) || []).map((l) => ({
+                    ...(((wh
+                      ? locationsByWarehouse[Number(wh)]
+                      : []) || []
+                    ).map((l) => ({
                       value: String(l.id),
                       label: l.name,
                     })) as any),
@@ -293,16 +352,24 @@ export default function ScreenprintCompletionPage() {
                   const okBarcode = !!normalize(r.barcode);
 
                   return (
-                    <div key={`${r.kind}-${r.id}`} className={`grid items-center gap-0 py-2 ${GRID_COLS}`}>
+                    <div
+                      key={`${r.kind}-${r.id}`}
+                      className={`grid items-center gap-0 py-2 ${GRID_COLS}`}
+                    >
                       <div className="px-3">
-                        <Checkbox checked={isSelected(r)} onChange={() => toggleOne(r)} />
+                        <Checkbox
+                          checked={isSelected(r)}
+                          onChange={() => toggleOne(r)}
+                        />
                       </div>
 
                       <div className="px-3">
                         <Link
                           to={`/details/${r.kind}/${r.id}`}
                           className="block max-w-full text-left text-sm text-brand-600 hover:underline underline-offset-2 dark:text-brand-400"
-                          title={`${r.kind === 'component' ? 'Komponent' : 'Ürün'} detayını aç`}
+                          title={`${
+                            r.kind === "component" ? "Komponent" : "Ürün"
+                          } detayını aç`}
                         >
                           <span className="block overflow-hidden break-words whitespace-normal leading-snug line-clamp-2">
                             {r.master?.display_label || "(Tanım Yok)"} #{r.id}
@@ -316,16 +383,20 @@ export default function ScreenprintCompletionPage() {
                             type="text"
                             value={r.barcode || ""}
                             onChange={(e) =>
-                              setRows(prev =>
-                                prev.map(x =>
+                              setRows((prev) =>
+                                prev.map((x) =>
                                   x.id === r.id && x.kind === r.kind
-                                    ? ({ ...x, barcode: e.target.value })
+                                    ? { ...x, barcode: e.target.value }
                                     : x
                                 )
                               )
                             }
                             placeholder="Barkod"
-                            className={`pr-10 ${okBarcode || !r.barcode ? "" : "border-error-500 focus:ring-error-500"}`}
+                            className={`pr-10 ${
+                              okBarcode || !r.barcode
+                                ? ""
+                                : "border-error-500 focus:ring-error-500"
+                            }`}
                           />
                           <button
                             type="button"
@@ -333,7 +404,17 @@ export default function ScreenprintCompletionPage() {
                             className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-white"
                             title="Barkod/QR Oku"
                           >
-                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              width="18"
+                              height="18"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
                               <path d="M3 7V5a2 2 0 0 1 2-2h2" />
                               <path d="M17 3h2a2 2 0 0 1 2 2v2" />
                               <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
@@ -343,16 +424,16 @@ export default function ScreenprintCompletionPage() {
                           </button>
                         </div>
                         {!okBarcode && r.barcode && (
-                          <div className="mt-1 text-xs text-amber-600">Barkod formatını kontrol ediniz.</div>
+                          <div className="mt-1 text-xs text-amber-600">
+                            Barkod formatını kontrol ediniz.
+                          </div>
                         )}
                       </div>
 
                       <div className="px-3">
-                        <span className="text-sm text-gray-800 dark:text-gray-100">{fmtQty(r)}</span>
-                      </div>
-
-                      <div className="px-3">
-                        <span className="text-sm text-gray-800 dark:text-gray-100">{fmtDim(r)}</span>
+                        <span className="text-sm text-gray-800 dark:text-gray-100">
+                          {fmtArea(r)}
+                        </span>
                       </div>
 
                       <div className="px-3">
@@ -366,7 +447,13 @@ export default function ScreenprintCompletionPage() {
                             setRows((prev) =>
                               prev.map((x) =>
                                 x.id === r.id && x.kind === r.kind
-                                  ? { ...x, warehouse_id: v ? Number(v) : undefined, location_id: v ? Number(nextLoc) : undefined }
+                                  ? {
+                                      ...x,
+                                      warehouse_id: v ? Number(v) : undefined,
+                                      location_id: v
+                                        ? Number(nextLoc)
+                                        : undefined,
+                                    }
                                   : x
                               )
                             );
@@ -383,7 +470,12 @@ export default function ScreenprintCompletionPage() {
                           onChange={(v: string) =>
                             setRows((prev) =>
                               prev.map((x) =>
-                                x.id === r.id && x.kind === r.kind ? { ...x, location_id: v ? Number(v) : undefined } : x
+                                x.id === r.id && x.kind === r.kind
+                                  ? {
+                                      ...x,
+                                      location_id: v ? Number(v) : undefined,
+                                    }
+                                  : x
                               )
                             )
                           }
@@ -401,13 +493,18 @@ export default function ScreenprintCompletionPage() {
         {/* MOBILE: Card Layout */}
         <div className="md:hidden space-y-3">
           {rows.length === 0 ? (
-            <div className="px-4 py-6 text-sm text-gray-500">Onay bekleyen kayıt yok.</div>
+            <div className="px-4 py-6 text-sm text-gray-500">
+              Onay bekleyen kayıt yok.
+            </div>
           ) : (
             rows.map((r) => {
               const wh = r.warehouse_id ? String(r.warehouse_id) : "";
               const locOpts = [
                 { value: "", label: "Seçiniz", disabled: true },
-                ...(((wh ? locationsByWarehouse[Number(wh)] : []) || []).map((l) => ({
+                ...(((wh
+                  ? locationsByWarehouse[Number(wh)]
+                  : []) || []
+                ).map((l) => ({
                   value: String(l.id),
                   label: l.name,
                 })) as any),
@@ -415,22 +512,30 @@ export default function ScreenprintCompletionPage() {
               const okBarcode = !!normalize(r.barcode);
 
               return (
-                <div key={`${r.kind}-${r.id}`} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+                <div
+                  key={`${r.kind}-${r.id}`}
+                  className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800"
+                >
                   {/* Header */}
                   <div className="mb-3 flex items-start gap-3">
                     <div className="pt-1">
-                      <Checkbox checked={isSelected(r)} onChange={() => toggleOne(r)} />
+                      <Checkbox
+                        checked={isSelected(r)}
+                        onChange={() => toggleOne(r)}
+                      />
                     </div>
                     <div className="flex-1 min-w-0">
                       <Link
                         to={`/details/${r.kind}/${r.id}`}
                         className="block text-sm font-semibold text-brand-600 hover:underline underline-offset-2 dark:text-brand-400"
-                        title={`${r.kind === 'component' ? 'Komponent' : 'Ürün'} detayını aç`}
+                        title={`${
+                          r.kind === "component" ? "Komponent" : "Ürün"
+                        } detayını aç`}
                       >
                         {r.master?.display_label || "(Tanım Yok)"} #{r.id}
                       </Link>
                       <div className="mt-1 text-xs text-gray-500">
-                        {fmtQty(r)} • {fmtDim(r)}
+                        Alan: {fmtArea(r)}
                       </div>
                     </div>
                   </div>
@@ -444,16 +549,20 @@ export default function ScreenprintCompletionPage() {
                           type="text"
                           value={r.barcode || ""}
                           onChange={(e) =>
-                            setRows(prev =>
-                              prev.map(x =>
+                            setRows((prev) =>
+                              prev.map((x) =>
                                 x.id === r.id && x.kind === r.kind
-                                  ? ({ ...x, barcode: e.target.value })
+                                  ? { ...x, barcode: e.target.value }
                                   : x
                               )
                             )
                           }
                           placeholder="Barkod"
-                          className={`pr-10 ${okBarcode || !r.barcode ? "" : "border-error-500 focus:ring-error-500"}`}
+                          className={`pr-10 ${
+                            okBarcode || !r.barcode
+                              ? ""
+                              : "border-error-500 focus:ring-error-500"
+                          }`}
                         />
                         <button
                           type="button"
@@ -461,7 +570,17 @@ export default function ScreenprintCompletionPage() {
                           className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-white"
                           title="Barkod/QR Oku"
                         >
-                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="18"
+                            height="18"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
                             <path d="M3 7V5a2 2 0 0 1 2-2h2" />
                             <path d="M17 3h2a2 2 0 0 1 2 2v2" />
                             <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
@@ -471,7 +590,9 @@ export default function ScreenprintCompletionPage() {
                         </button>
                       </div>
                       {!okBarcode && r.barcode && (
-                        <div className="mt-1 text-xs text-amber-600">Barkod formatını kontrol ediniz.</div>
+                        <div className="mt-1 text-xs text-amber-600">
+                          Barkod formatını kontrol ediniz.
+                        </div>
                       )}
                     </div>
 
@@ -486,7 +607,13 @@ export default function ScreenprintCompletionPage() {
                           setRows((prev) =>
                             prev.map((x) =>
                               x.id === r.id && x.kind === r.kind
-                                ? { ...x, warehouse_id: v ? Number(v) : undefined, location_id: v ? Number(nextLoc) : undefined }
+                                ? {
+                                    ...x,
+                                    warehouse_id: v ? Number(v) : undefined,
+                                    location_id: v
+                                      ? Number(nextLoc)
+                                      : undefined,
+                                  }
                                 : x
                             )
                           );
@@ -503,7 +630,12 @@ export default function ScreenprintCompletionPage() {
                         onChange={(v: string) =>
                           setRows((prev) =>
                             prev.map((x) =>
-                              x.id === r.id && x.kind === r.kind ? { ...x, location_id: v ? Number(v) : undefined } : x
+                              x.id === r.id && x.kind === r.kind
+                                ? {
+                                    ...x,
+                                    location_id: v ? Number(v) : undefined,
+                                  }
+                                : x
                             )
                           )
                         }
@@ -518,7 +650,11 @@ export default function ScreenprintCompletionPage() {
         </div>
 
         <div className="mt-6 flex justify-end">
-          <Button variant="primary" onClick={handleApproveSelected} disabled={loading || selectedIds.size === 0}>
+          <Button
+            variant="primary"
+            onClick={handleApproveSelected}
+            disabled={loading || selectedIds.size === 0}
+          >
             Seçilenleri Onayla
           </Button>
         </div>

@@ -1,5 +1,5 @@
 // src/pages/Details/MasterDetailPage.tsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import api from "../../services/api";
 
@@ -10,32 +10,36 @@ import Label from "../../components/form/Label";
 import Input from "../../components/form/input/InputField";
 import Button from "../../components/ui/button/Button";
 
-/* ---------- Şema tipleri ---------- */
-type FieldDef = {
-  key: string;
-  label: string;
-  kind: "text" | "number" | "select";
-  required?: boolean;
-  unitSuffix?: string;
-  options?: { value: string | number; label: string }[];
-};
-type Schema = {
-  version: string | number;
-  baseFields: FieldDef[];
-  categoryFields: Record<string, FieldDef[]>;
-  categoryMapById?: Record<string | number, string>;
-  categoryMapByName?: Record<string, string>;
+/* ---------- Master view (JOIN edilmiş) ---------- */
+// MasterView tipinin üst kısmı
+type MasterView = {
+  id: number;
+
+  bimeks_product_name?: string | null;   // 👈 EKLE
+  bimeks_code?: string | null;
+
+  // eski ama dursun, BE'den gelebilir
+  display_label?: string | null;
+
+  supplier_product_code?: string | null;
+  // supplier_lot_no'yu artık kullanmıyoruz, kalsa da sorun değil
+  supplier_lot_no?: string | null;
+
+  thickness?: number | null;
+  carrier_density?: number | null;
+  length_unit?: string | null;
+
+  product_type_name?: string | null;
+  carrier_type_name?: string | null;
+  supplier_name?: string | null;
+  carrier_color_name?: string | null;
+  liner_color_name?: string | null;
+  liner_type_name?: string | null;
+  adhesive_type_name?: string | null;
+
+  [key: string]: any;
 };
 
-/* ---------- Master view (read-only) ---------- */
-type MasterView = Record<string, any> & {
-  id: number;
-  display_label?: string | null;
-  category_name?: string | null;
-  type_name?: string | null;
-  supplier_name?: string | null;
-  bimeks_code?: string | null;
-};
 
 export default function MasterDetailPage() {
   const { id: rawId } = useParams();
@@ -43,8 +47,6 @@ export default function MasterDetailPage() {
   const id = Number(rawId || 0);
 
   const [loading, setLoading] = useState(true);
-  const [schema, setSchema] = useState<Schema | null>(null);
-
   const [masterView, setMasterView] = useState<MasterView | null>(null);
   const [bimeksCode, setBimeksCode] = useState<string>("");
 
@@ -53,15 +55,12 @@ export default function MasterDetailPage() {
       navigate("/404");
       return;
     }
+
     (async () => {
       try {
         setLoading(true);
-        const [schemaRes, masterRes] = await Promise.all([
-          api.get("/lookups/master-field-schema"),
-          api.get(`/masters/${id}`),
-        ]);
-        setSchema(schemaRes.data || null);
-        const mv = masterRes.data || null;
+        const { data } = await api.get(`/masters/${id}`);
+        const mv: MasterView = data || null;
         setMasterView(mv);
         setBimeksCode(mv?.bimeks_code || "");
       } catch (e) {
@@ -73,31 +72,26 @@ export default function MasterDetailPage() {
     })();
   }, [id, navigate]);
 
-  /* ------ Şemaya göre gösterilecek alanları hazırla ------ */
-  const masterCategoryKey = useMemo(() => {
-    if (!schema || !masterView?.category_name) return null;
-    const map = schema.categoryMapByName || {};
-    return map[String(masterView.category_name).toUpperCase()] || null;
-  }, [schema, masterView?.category_name]);
-
-  const masterFieldsToShow: FieldDef[] = useMemo(() => {
-    if (!schema) return [];
-    const base = schema.baseFields || [];
-    const cat = masterCategoryKey ? schema.categoryFields?.[masterCategoryKey] || [] : [];
-    return [...base, ...cat];
-  }, [schema, masterCategoryKey]);
-
-  /* ------ Kaydet (sadece Bimeks Kodu düzenlenebilir) ------ */
+  /* ------ Kaydet (sadece Bimeks Kodu) ------ */
   const handleSave = async () => {
     try {
-      await api.put(`/masters/${id}`, { bimeks_code: bimeksCode || null });
+      const payload = { bimeks_code: bimeksCode || null };
+      // Router: PUT /masters/:id/full
+      const { data } = await api.put(`/masters/${id}/full`, payload);
+      setMasterView(data);
       alert("Bimeks Kodu güncellendi.");
-      setMasterView((p) => (p ? { ...p, bimeks_code: bimeksCode || null } : p));
     } catch (err: any) {
-      console.error("save error:", err?.response?.data || err);
-      alert("Kaydetme hatası.");
+      console.error("master save error:", err?.response?.data || err);
+      alert(err?.response?.data?.message || "Kaydetme hatası.");
     }
   };
+
+  const m = masterView;
+
+  const fmtNum = (v?: number | null, suffix?: string) =>
+    v === null || v === undefined || Number.isNaN(Number(v))
+      ? ""
+      : `${v} ${suffix ?? ""}`.trim();
 
   return (
     <div className="space-y-6">
@@ -108,14 +102,22 @@ export default function MasterDetailPage() {
         <ComponentCard title="Yükleniyor…">
           <div className="py-6 text-sm text-gray-500">Lütfen bekleyin…</div>
         </ComponentCard>
+      ) : !m ? (
+        <ComponentCard title="Bulunamadı">
+          <div className="py-6 text-sm text-gray-500">
+            Kayıt bulunamadı veya silinmiş olabilir.
+          </div>
+        </ComponentCard>
       ) : (
         <ComponentCard title="Tanım (Master)">
-          {/* Başlık satırı */}
+          {/* Tüm alanlar: tek grid, 2 kolon */}
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {/* 1. satır */}
             <div>
-              <Label>Display Name</Label>
-              <Input value={masterView?.display_label ?? ""} disabled />
+              <Label>Tanım İsmi</Label>
+              <Input value={m.bimeks_product_name ?? ""} disabled />
             </div>
+
             <div>
               <Label>Bimeks Kodu</Label>
               <Input
@@ -124,36 +126,79 @@ export default function MasterDetailPage() {
                 placeholder="Bimeks Kodu"
               />
             </div>
-          </div>
 
-          {/* Şemaya göre alanlar (read-only) */}
-          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-            {masterFieldsToShow.map((f) => {
-              // select’lerin label karşılığı response’ta varsa onu göster
-              let raw: any = masterView?.[f.key];
-              if (f.key === "type_id" && masterView?.type_name) raw = masterView.type_name;
-              if (f.key === "supplier_id" && masterView?.supplier_name) raw = masterView.supplier_name;
+            {/* 2. satır */}
+            <div>
+              <Label>Ürün Türü</Label>
+              <Input value={m.product_type_name ?? ""} disabled />
+            </div>
 
-              const value = raw === null || raw === undefined ? "" : String(raw);
-              const suffix = f.unitSuffix ? ` ${f.unitSuffix}` : "";
-              return (
-                <div key={f.key}>
-                  <Label>{f.label}</Label>
-                  <Input value={`${value}${value ? suffix : ""}`} disabled />
-                </div>
-              );
-            })}
+            <div>
+              <Label>Taşıyıcı Türü</Label>
+              <Input value={m.carrier_type_name ?? ""} disabled />
+            </div>
+
+            {/* 3. satır */}
+            <div>
+              <Label>Tedarikçi</Label>
+              <Input value={m.supplier_name ?? ""} disabled />
+            </div>
+
+            <div>
+              <Label>Tedarikçi Ürün Kodu</Label>
+              <Input value={m.supplier_product_code ?? ""} disabled />
+            </div>
+
+            {/* 4. satır */}
+            <div>
+              <Label>Stok Uzunluk Birimi</Label>
+              <Input value={(m.length_unit || "").toUpperCase()} disabled />
+            </div>
+
+            <div>
+              <Label>Kalınlık</Label>
+              <Input value={fmtNum(m.thickness, "mm")} disabled />
+            </div>
+
+            {/* 5. satır */}
+            <div>
+              <Label>Taşıyıcı Yoğunluğu</Label>
+              <Input value={fmtNum(m.carrier_density, "kg/m³")} disabled />
+            </div>
+
+            <div>
+              <Label>Taşıyıcı Rengi</Label>
+              <Input value={m.carrier_color_name ?? ""} disabled />
+            </div>
+
+            {/* 6. satır */}
+            <div>
+              <Label>Liner Rengi</Label>
+              <Input value={m.liner_color_name ?? ""} disabled />
+            </div>
+
+            <div>
+              <Label>Liner Cinsi</Label>
+              <Input value={m.liner_type_name ?? ""} disabled />
+            </div>
+
+            {/* 7. satır */}
+            <div>
+              <Label>Yapışkan Türü</Label>
+              <Input value={m.adhesive_type_name ?? ""} disabled />
+            </div>
           </div>
 
           <div className="mt-3 text-xs text-gray-500 dark:text-gray-400">
-            Master yalnızca görüntülenebilir, düzenlenemez.
+            Master alanları yalnızca görüntülenebilir; sadece Bimeks Kodu
+            güncellenebilir.
           </div>
 
           <div className="mt-6 flex justify-end">
             <Button
               variant="primary"
               onClick={handleSave}
-              disabled={bimeksCode === (masterView?.bimeks_code || "")}
+              disabled={bimeksCode === (m.bimeks_code || "")}
             >
               Kaydet
             </Button>

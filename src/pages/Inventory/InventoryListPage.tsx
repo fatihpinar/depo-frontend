@@ -1,4 +1,4 @@
-// src/pages/Inventory/InventoryList.tsx
+// src/pages/Inventory/InventoryListPage.tsx
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import PageMeta from "../../components/common/PageMeta";
@@ -10,7 +10,7 @@ import Button from "../../components/ui/button/Button";
 import api from "../../services/api";
 import * as XLSX from "xlsx";
 
-function exportToExcel(rows: any[]) {
+function exportToExcel(rows: Row[]) {
   const data = rows.map((r) => ({
     Tip: r.item_type === "product" ? "Ürün" : "Komponent",
     Barkod: r.barcode,
@@ -29,6 +29,7 @@ function exportToExcel(rows: any[]) {
 }
 
 type ItemType = "product" | "component";
+
 type Row = {
   item_type: ItemType;
   item_id: number;
@@ -49,12 +50,12 @@ type Warehouse = { id: number; name: string };
 type Location = { id: number; name: string; warehouse_id: number };
 
 const TYPE_OPTIONS = [
-  { value: "all", label: "Tümü" },
+  { value: "all",       label: "Tümü" },
   { value: "component", label: "Komponent" },
-  { value: "product", label: "Ürün" },
+  { value: "product",   label: "Ürün" },
 ];
 
-export default function InventoryList() {
+export default function InventoryListPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [total, setTotal] = useState<number>(0);
 
@@ -83,7 +84,7 @@ export default function InventoryList() {
     const id = Number(wh || 0);
     if (!id || locationsByWarehouse[id]) return;
     try {
-      const { data } = await api.get(`/lookups/locations`, {
+      const { data } = await api.get("/lookups/locations", {
         params: { warehouseId: id },
       });
       setLocationsByWarehouse((prev) => ({ ...prev, [id]: data || [] }));
@@ -98,7 +99,7 @@ export default function InventoryList() {
       { value: "", label: "Depo (Tümü)" },
       ...warehouses.map((w) => ({ value: String(w.id), label: w.name })),
     ],
-    [warehouses]
+    [warehouses],
   );
 
   const locationOptions = useMemo(() => {
@@ -131,13 +132,15 @@ export default function InventoryList() {
           type: _type || "all",
           warehouseId: _wh || undefined,
           locationId: _lc || undefined,
-          statusId: 1, // sadece Depoda
+          // statusId GÖNDERMİYORUZ; BE inStockOnly ile 1'e sabitliyor.
           limit: 200,
           offset: 0,
         },
       });
-      setRows((res.data?.items || res.data?.rows || []) as Row[]);
-      setTotal(Number(res.data?.total || 0));
+
+      const items = (res.data?.items || res.data?.rows || []) as Row[];
+      setRows(items);
+      setTotal(Number(res.data?.total || items.length || 0));
     } catch (e) {
       console.error("inventory fetch error:", e);
       setRows([]);
@@ -154,12 +157,10 @@ export default function InventoryList() {
 
   /* ------------ Handlers ------------ */
   const handleReset = () => {
-    // state'i temizle
     setQ("");
     setType("all");
     setWarehouseId("");
     setLocationId("");
-    // anında temiz parametrelerle çek
     fetchData({ q: "", type: "all", warehouseId: "", locationId: "" });
   };
 
@@ -187,14 +188,18 @@ export default function InventoryList() {
 
       {/* Filtreler */}
       <ComponentCard title="Filtreler">
-        {/* 7 kolon: 4 filtre + 3 buton; buton boyları inputlarla aynı */}
         <div className="grid grid-cols-1 gap-3 md:grid-cols-7">
           <Input
             placeholder="Ara (barkod, tanım…)"
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
-          <Select options={TYPE_OPTIONS} value={type} onChange={setType} placeholder="Tip" />
+          <Select
+            options={TYPE_OPTIONS}
+            value={type}
+            onChange={setType}
+            placeholder="Tip"
+          />
           <Select
             options={warehouseOptions}
             value={warehouseId}
@@ -212,7 +217,6 @@ export default function InventoryList() {
             placeholder="Lokasyon"
           />
 
-          {/* Uygula */}
           <div className="flex">
             <Button
               variant="primary"
@@ -223,7 +227,6 @@ export default function InventoryList() {
             </Button>
           </div>
 
-          {/* Sıfırla */}
           <div className="flex">
             <Button
               variant="primary"
@@ -234,7 +237,6 @@ export default function InventoryList() {
             </Button>
           </div>
 
-          {/* Excel’e Aktar */}
           <div className="flex">
             <Button
               variant="primary"
@@ -311,37 +313,49 @@ export default function InventoryList() {
                           {r.name}
                         </Link>
                       ) : (
-                        <span className="text-gray-400 dark:text-gray-500">—</span>
+                        <span className="text-gray-400 dark:text-gray-500">
+                          —
+                        </span>
                       )}
                     </td>
 
                     <td className="px-4 py-3">
                       {r.unit ?? (
-                        <span className="text-gray-400 dark:text-gray-500">—</span>
+                        <span className="text-gray-400 dark:text-gray-500">
+                          —
+                        </span>
                       )}
                     </td>
                     <td className="px-4 py-3">
                       {typeof r.quantity === "number" ? (
                         r.quantity
                       ) : (
-                        <span className="text-gray-400 dark:text-gray-500">—</span>
+                        <span className="text-gray-400 dark:text-gray-500">
+                          —
+                        </span>
                       )}
                     </td>
 
                     <td className="px-4 py-3">
                       {r.warehouse_name ?? (
-                        <span className="text-gray-400 dark:text-gray-500">—</span>
+                        <span className="text-gray-400 dark:text-gray-500">
+                          —
+                        </span>
                       )}
                     </td>
                     <td className="px-4 py-3">
                       {r.location_name ?? (
-                        <span className="text-gray-400 dark:text-gray-500">—</span>
+                        <span className="text-gray-400 dark:text-gray-500">
+                          —
+                        </span>
                       )}
                     </td>
 
                     <td className="px-4 py-3">
                       {r.status_label ?? (
-                        <span className="text-gray-400 dark:text-gray-500">—</span>
+                        <span className="text-gray-400 dark:text-gray-500">
+                          —
+                        </span>
                       )}
                     </td>
                     <td className="px-4 py-3">{prettyDate(r.updated_at)}</td>
@@ -361,7 +375,6 @@ export default function InventoryList() {
           </table>
         </div>
 
-        {/* footer */}
         <div className="flex items-center justify-between px-4 py-3 text-xs text-gray-500 dark:text-gray-400">
           <span>Toplam: {total}</span>
           <span>Gösterilen: {rows.length}</span>

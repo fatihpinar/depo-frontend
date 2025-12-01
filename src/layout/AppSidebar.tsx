@@ -26,16 +26,17 @@ type NavItem = {
 
 /** İzin eşlemesi (path -> gerekli izinler) */
 const PERM_BY_PATH: Record<string, string[] | undefined> = {
-  "/stock-entry": ["stock.entry.create"],
-  "/product-assemble": ["product.assemble"],
-  "/masters": ["masters.read"],
-  "/stocks": ["components.read"],
-  "/productsList": ["products.read"],
-  "/InventoryList": ["inventory.read"],
+  "/inventory/stock-entry": ["stock.entry.create"],
+  "/inventory/stock-exit": ["product.assemble"],
+  "/inventory/masters": ["masters.read"],
+  "/inventory/components": ["components.read"],
+  "/inventory/products": ["products.read"],
+  "/inventory/list": ["inventory.read"],
   "/stock-receipts": ["receipts.stock.approve"],
   "/production-receipts": ["receipts.production.approve"],
   "/screenprint-receipts": ["receipts.screenprint.approve"],
 };
+
 
 function canSee(path?: string): boolean {
   if (!path) return true;
@@ -47,22 +48,26 @@ function canSee(path?: string): boolean {
 /** ÜST KISIM (MENU) */
 const navItems: NavItem[] = [
   { icon: <GridIcon />, name: "Dashboard", path: "/" },
-  { icon: <ListIcon />, name: "Stok Girişi", path: "/stock-entry" },
-  { icon: <ListIcon />, name: "Ürün Oluşturma", path: "/product-assemble" },
+
+  { icon: <ListIcon />, name: "Stok Girişi", path: "/inventory/stock-entry" },
+  { icon: <ListIcon />, name: "Stok Çıkışı / Ürün", path: "/inventory/stock-exit" },
+
   {
     icon: <TableIcon />,
     name: "Listeler",
     subItems: [
-      { name: "Tanım Listesi", path: "/masters" },
-      { name: "Komponent Listesi", path: "/stocks" },
-      { name: "Ürün Listesi", path: "/productsList" },
-      { name: "Envanter Listesi", path: "/InventoryList" },
+      { name: "Tanım Listesi", path: "/inventory/masters" },
+      { name: "Komponent Listesi", path: "/inventory/components" },
+      { name: "Ürün Listesi", path: "/inventory/products" },
+      { name: "Envanter Listesi", path: "/inventory/list" },
     ],
   },
+
   { icon: <TaskIcon />, name: "Stok Girişi Tamamlama", path: "/stock-receipts" },
   { icon: <TaskIcon />, name: "Üretim Tamamlama", path: "/production-receipts" },
   { icon: <TaskIcon />, name: "Serigrafi Tamamlama", path: "/screenprint-receipts" },
 ];
+
 
 const AppSidebar: React.FC = () => {
   const { isExpanded, isMobileOpen, isHovered, setIsHovered } = useSidebar();
