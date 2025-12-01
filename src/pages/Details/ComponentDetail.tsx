@@ -57,8 +57,6 @@ export default function ComponentDetailPage() {
 
   const [width, setWidth] = useState<number | "">("");
   const [height, setHeight] = useState<number | "">("");
-  const [unit, setUnit] = useState<"EA" | "M" | "KG" | string>("");
-  const [quantity, setQuantity] = useState<number>(0);
   const [area, setArea] = useState<number | "">(""); // 👈 yeni
   // en / boy değişince alanı canlı hesapla
   useEffect(() => {
@@ -91,22 +89,7 @@ export default function ComponentDetailPage() {
     const list = warehouseId ? locationsByWarehouse[Number(warehouseId)] || [] : [];
     return [{ value: "", label: "Seçiniz", disabled: true }, ...list.map((l) => ({ value: String(l.id), label: l.name }))];
   }, [warehouseId, locationsByWarehouse]);
-  const masterOptions = useMemo(
-    () => [
-      { value: "", label: "Seçiniz", disabled: true },
-      ...masters.map((m) => ({
-        value: String(m.id),
-        label:
-          m.display_label ||
-          m.bimeks_product_name || // 👈 asıl kaynak
-          m.name ||
-          `#${m.id}`,
-      })),
-    ],
-    [masters]
-  );
-
-
+  
   /* ------ helpers ------ */
   const ensureLocations = async (wh: number | "") => {
     const w = Number(wh || 0);
@@ -168,7 +151,6 @@ export default function ComponentDetailPage() {
         setLocationId(data.location?.id || "");
         setInvoiceNo(data.invoice_no || "");
         setNotes(data.notes || "");
-        setUnit(data.unit || "");
 
         // width / height sayıya çevrilmiş hali
         const wNum = data.width !== null && data.width !== undefined
@@ -192,9 +174,6 @@ export default function ComponentDetailPage() {
         setArea(
           areaNum !== null && !Number.isNaN(areaNum) ? areaNum : ""
         );
-
-        // miktar state’i şimdilik sadece referans, ekrandan değiştirmiyoruz
-        setQuantity(Number(data.quantity || 0));
 
         setMasterCode(data.master?.bimeks_code || "");
 
