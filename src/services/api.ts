@@ -2,20 +2,39 @@
 import axios from "axios";
 import { getAuth, clearAuth } from "../components/auth/storage";
 
-// Prod'da her zaman Nginx üzerinden /api kullanacağız
-const isProd = import.meta.env.MODE === "production";
+// === Base URL hesaplama ===
+function resolveBaseURL() {
+  // Browser'dayız ve sunucuya deploy edilmiş durumdaysak:
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
 
-const rawBase = isProd
-  ? "/api" // 👈 canlı sunucuda her zaman bu
-  : import.meta.env.VITE_API_URL || "http://localhost:3000/api"; // local dev
+    const isLocal =
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host === "::1";
 
-// Sonda gereksiz / olmasın ("/api///" → "/api")
+    // Local değilse (yani 13.60.253.7 ya da ileride domain)
+    // her zaman Nginx üzerinden /api kullan:
+    if (!isLocal) {
+      return "/api";
+    }
+  }
+
+  // Local geliştirme: env varsa onu, yoksa localhost:3000/api
+  return import.meta.env.VITE_API_URL || "http://localhost:3000/api";
+}
+
+const rawBase = resolveBaseURL();
+
+// Sonda gereksiz / olmasın
 const baseURL = rawBase.replace(/\/+$/, "");
+
+// Sırf debug için – prod’da da kalabilir, zararı yok:
+console.log("[API] baseURL =", baseURL);
 
 const api = axios.create({
   baseURL,
   headers: { "Content-Type": "application/json" },
-  // timeout: 20000,
 });
 
 // ---- Request: Authorization ekle ----
