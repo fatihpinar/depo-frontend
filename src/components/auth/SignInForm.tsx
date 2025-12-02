@@ -11,8 +11,6 @@ import { refreshPermissions } from "./permissions";
 import api from "../../services/api";   // 👈 ORTAK axios client
 
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
-
 export default function SignInForm() {
   const navigate = useNavigate();
 
