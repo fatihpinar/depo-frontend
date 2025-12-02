@@ -7,7 +7,9 @@ import Input from "../form/input/InputField";
 import Checkbox from "../form/input/Checkbox";
 import Button from "../ui/button/Button";
 import { setAuth, getAuth } from "./storage";
-import { refreshPermissions } from "./permissions"; // 👈 ekle
+import { refreshPermissions } from "./permissions";
+import api from "../../services/api";   // 👈 ORTAK axios client
+
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
 
@@ -42,26 +44,21 @@ export default function SignInForm() {
       return;
     }
 
-    setLoading(true);
+        setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: email.trim().toLowerCase(),
-          password,
-        }),
+      // Ortak axios client → baseURL zaten /api
+      const res = await api.post("/auth/login", {
+        email: email.trim().toLowerCase(),
+        password,
       });
 
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(friendlyError(data?.message, res.status));
+      const data = res.data;
 
       // 1) Yeni oturumu yaz
       setAuth(data.token, data.user, remember);
 
       // 2) Eski izin cache’ini temizle (guard)
       sessionStorage.removeItem("perms");
-      // Sekmeler duysun (opsiyonel ama güzel)
       try {
         localStorage.setItem("__perms_reset__", String(Date.now()));
         localStorage.removeItem("__perms_reset__");
@@ -73,7 +70,9 @@ export default function SignInForm() {
       // 4) Dashboard
       navigate("/", { replace: true });
     } catch (e: any) {
-      setErr(e?.message ? String(e.message) : "Giriş başarısız.");
+      const rawMsg = e?.response?.data?.message;
+      const status = e?.response?.status;
+      setErr(friendlyError(rawMsg, status));
     } finally {
       setLoading(false);
     }
