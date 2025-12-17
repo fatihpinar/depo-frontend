@@ -11,22 +11,25 @@ import Input from "../../components/form/input/InputField";
 import Button from "../../components/ui/button/Button";
 
 /* ---------- Master view (JOIN edilmiş) ---------- */
-// MasterView tipinin üst kısmı
 type MasterView = {
   id: number;
 
-  bimeks_product_name?: string | null;   // 👈 EKLE
+  bimeks_product_name?: string | null;
   bimeks_code?: string | null;
 
-  // eski ama dursun, BE'den gelebilir
+  // eski ama dursun
   display_label?: string | null;
 
   supplier_product_code?: string | null;
-  // supplier_lot_no'yu artık kullanmıyoruz, kalsa da sorun değil
   supplier_lot_no?: string | null;
 
   thickness?: number | null;
+  thickness_unit?: string | null;   // ✅ YENİ
+  stock_unit?: string | null;       // ✅ YENİ
+
   carrier_density?: number | null;
+
+  // eskiden vardı, kalsın
   length_unit?: string | null;
 
   product_type_name?: string | null;
@@ -40,12 +43,28 @@ type MasterView = {
   [key: string]: any;
 };
 
+function stockUnitLabelTR(v?: string | null) {
+  const s = (v || "").toLowerCase();
+  if (s === "area") return "Alan";
+  if (s === "weight") return "Ağırlık";
+  if (s === "length") return "Uzunluk";
+  if (s === "unit") return "Adet";
+  return v ? String(v) : "";
+}
+
+function thicknessUnitLabelTR(v?: string | null) {
+  const s = (v || "").toLowerCase();
+  if (s === "um") return "µm";
+  if (s === "m") return "m";
+  return v ? String(v) : "";
+}
 
 export default function MasterDetailPage() {
   const { id: rawId } = useParams();
   const navigate = useNavigate();
   const id = Number(rawId || 0);
 
+  const [masterName, setMasterName] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [masterView, setMasterView] = useState<MasterView | null>(null);
   const [bimeksCode, setBimeksCode] = useState<string>("");
@@ -63,6 +82,7 @@ export default function MasterDetailPage() {
         const mv: MasterView = data || null;
         setMasterView(mv);
         setBimeksCode(mv?.bimeks_code || "");
+        setMasterName(mv?.bimeks_product_name || "");
       } catch (e) {
         console.error("master detail load error:", e);
         alert("Detay yüklenemedi.");
@@ -72,14 +92,19 @@ export default function MasterDetailPage() {
     })();
   }, [id, navigate]);
 
-  /* ------ Kaydet (sadece Bimeks Kodu) ------ */
+  /* ------ Kaydet (Sadece: bimeks_code + bimeks_product_name) ------ */
   const handleSave = async () => {
     try {
-      const payload = { bimeks_code: bimeksCode || null };
-      // Router: PUT /masters/:id/full
+      const payload = {
+        bimeks_code: bimeksCode || null,
+        bimeks_product_name: masterName?.trim() || null,
+      };
+
       const { data } = await api.put(`/masters/${id}/full`, payload);
       setMasterView(data);
-      alert("Bimeks Kodu güncellendi.");
+      setBimeksCode(data?.bimeks_code || "");
+      setMasterName(data?.bimeks_product_name || "");
+      alert("Master tanımı ve Bimeks Kodu güncellendi.");
     } catch (err: any) {
       console.error("master save error:", err?.response?.data || err);
       alert(err?.response?.data?.message || "Kaydetme hatası.");
@@ -110,14 +135,16 @@ export default function MasterDetailPage() {
         </ComponentCard>
       ) : (
         <ComponentCard title="Tanım (Master)">
-          {/* Tüm alanlar: tek grid, 2 kolon */}
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            {/* 1. satır */}
+            {/* 1. satır (editable) */}
             <div>
               <Label>Tanım İsmi</Label>
-              <Input value={m.bimeks_product_name ?? ""} disabled />
+              <Input
+                value={masterName}
+                onChange={(e) => setMasterName(e.target.value)}
+                placeholder="Bimeks ürün tanımı"
+              />
             </div>
-
             <div>
               <Label>Bimeks Kodu</Label>
               <Input
@@ -132,7 +159,6 @@ export default function MasterDetailPage() {
               <Label>Ürün Türü</Label>
               <Input value={m.product_type_name ?? ""} disabled />
             </div>
-
             <div>
               <Label>Taşıyıcı Türü</Label>
               <Input value={m.carrier_type_name ?? ""} disabled />
@@ -143,46 +169,54 @@ export default function MasterDetailPage() {
               <Label>Tedarikçi</Label>
               <Input value={m.supplier_name ?? ""} disabled />
             </div>
-
             <div>
               <Label>Tedarikçi Ürün Kodu</Label>
               <Input value={m.supplier_product_code ?? ""} disabled />
             </div>
 
-            {/* 4. satır */}
+            {/* ✅ 4. satır (YENİ: stok_unit + thickness_unit) */}
             <div>
-              <Label>Stok Uzunluk Birimi</Label>
-              <Input value={(m.length_unit || "").toUpperCase()} disabled />
+              <Label>Stok Ölçü Birimi</Label>
+              <Input value={stockUnitLabelTR(m.stock_unit)} disabled />
             </div>
-
             <div>
-              <Label>Kalınlık</Label>
-              <Input value={fmtNum(m.thickness, "mm")} disabled />
+              <Label>Kalınlık Birimi</Label>
+              <Input value={thicknessUnitLabelTR(m.thickness_unit)} disabled />
             </div>
 
             {/* 5. satır */}
+            <div>
+              <Label>Kalınlık</Label>
+              <Input
+                value={
+                  m.thickness === null || m.thickness === undefined
+                    ? ""
+                    : `${m.thickness} ${thicknessUnitLabelTR(m.thickness_unit)}`.trim()
+                }
+                disabled
+              />
+            </div>
+
             <div>
               <Label>Taşıyıcı Yoğunluğu</Label>
               <Input value={fmtNum(m.carrier_density, "kg/m³")} disabled />
             </div>
 
+            {/* 6. satır */}
             <div>
               <Label>Taşıyıcı Rengi</Label>
               <Input value={m.carrier_color_name ?? ""} disabled />
             </div>
-
-            {/* 6. satır */}
             <div>
               <Label>Liner Rengi</Label>
               <Input value={m.liner_color_name ?? ""} disabled />
             </div>
 
+            {/* 7. satır */}
             <div>
               <Label>Liner Cinsi</Label>
               <Input value={m.liner_type_name ?? ""} disabled />
             </div>
-
-            {/* 7. satır */}
             <div>
               <Label>Yapışkan Türü</Label>
               <Input value={m.adhesive_type_name ?? ""} disabled />
@@ -190,15 +224,18 @@ export default function MasterDetailPage() {
           </div>
 
           <div className="mt-3 text-xs text-gray-500 dark:text-gray-400">
-            Master alanları yalnızca görüntülenebilir; sadece Bimeks Kodu
-            güncellenebilir.
+            Master alanları yalnızca görüntülenebilir; sadece <b>Bimeks Ürün Tanımı</b> ve{" "}
+            <b>Bimeks Kodu</b> güncellenebilir.
           </div>
 
           <div className="mt-6 flex justify-end">
             <Button
               variant="primary"
               onClick={handleSave}
-              disabled={bimeksCode === (m.bimeks_code || "")}
+              disabled={
+                bimeksCode === (m.bimeks_code || "") &&
+                masterName === (m.bimeks_product_name || "")
+              }
             >
               Kaydet
             </Button>

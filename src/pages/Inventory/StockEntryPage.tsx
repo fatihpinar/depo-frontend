@@ -43,6 +43,10 @@ interface Location {
   warehouse_id: number;
 }
 
+type StockUnit = "area" | "weight" | "length" | "unit";
+type ThicknessUnit = "um" | "m";
+
+
 interface Master {
   id: number;
   display_label: string;
@@ -51,24 +55,40 @@ interface Master {
   carrier_type_id?: number;
   bimeks_code?: string;
   bimeks_product_name?: string;
-  length_unit?: "m" | "um";
+
+  // length_unit yerine:
+  thickness_unit?: ThicknessUnit;
+  stock_unit?: StockUnit;
+
   supplier_id?: number;
   supplier_name?: string;
   supplier_product_code?: string;
 }
+
 
 interface Row {
   id: string;
   master_id: number;
   display_label: string;
   qty: number;
+
   width?: string;
   height?: string;
+  weight?: string;   // 🔹 yeni
+  length?: string;   // 🔹 yeni
+
   warehouse_id?: string;
   location_id?: string;
   invoice_no?: string;
-  length_unit?: "m" | "um";
+
+  thickness_unit?: ThicknessUnit;
+  stock_unit?: StockUnit;  // 🔹 satırda master'ın stok birimi
+
+  bimeks_code?: string;
+  bimeks_product_name?: string;
 }
+
+
 
 interface AlertState {
   variant: "success" | "error" | "warning" | "info";
@@ -112,7 +132,18 @@ function MasterInlineForm({ onSaved, onCancel }: MasterInlineFormProps) {
   const [linerColors, setLinerColors] = useState<SimpleLookup[]>([]);
   const [linerTypes, setLinerTypes] = useState<SimpleLookup[]>([]);
   const [adhesiveTypes, setAdhesiveTypes] = useState<SimpleLookup[]>([]);
-  const [lengthUnit, setLengthUnit] = useState<"m" | "um">("m");
+// Yeni (lengthUnit'i kalınlık birimi olarak kullanıyoruz)
+  const [lengthUnit, setLengthUnit] = useState<ThicknessUnit>("m");
+
+  // + yeni stok birimi state'i:
+  const [stockUnit, setStockUnit] = useState<StockUnit>("area");
+
+  const stockUnitOptions = [
+    createSelectOption("area", "Alan (m²)"),
+    createSelectOption("weight", "Ağırlık (kg)"),
+    createSelectOption("length", "Uzunluk (m)"),
+    createSelectOption("unit", "Adet (EA)"),  // 🔹 yeni
+  ];
 
   // Form values
   const [productTypeId, setProductTypeId] = useState("");
@@ -254,9 +285,9 @@ function MasterInlineForm({ onSaved, onCancel }: MasterInlineFormProps) {
     [adhesiveTypes]
   );
 
-  const lengthUnitOptions = [
-    createSelectOption("m", "Metre (m)"),
+  const thicknessUnitOptions = [
     createSelectOption("um", "Mikron (µm)"),
+    createSelectOption("m", "Metre (m)"),
   ];
 
   // ----- ON CHANGE HANDLERS -----
@@ -343,7 +374,9 @@ function MasterInlineForm({ onSaved, onCancel }: MasterInlineFormProps) {
     if (!addingLinerColor && !linerColorId) missing.push("Liner Renk");
     if (!addingLinerType && !linerTypeId) missing.push("Liner Türü");
     if (!addingAdhesiveType && !adhesiveTypeId) missing.push("Yapışkan Türü");
-    if (!lengthUnit) missing.push("Stok Ölçü Birimi");
+    if (!stockUnit) missing.push("Stok Birimi");
+    if (!lengthUnit) missing.push("Kalınlık Birimi");
+
 
     if (!bimeksProductName.trim()) missing.push("Bimeks Ürün Tanımı");
     if (!supplierProductCode.trim()) missing.push("Tedarikçi Ürün Kodu");
@@ -522,9 +555,15 @@ function MasterInlineForm({ onSaved, onCancel }: MasterInlineFormProps) {
         liner_color_id: finalLinerColorId,
         liner_type_id: finalLinerTypeId,
         adhesive_type_id: finalAdhesiveTypeId,
+
+        // Kalınlık + birimi
         thickness: thickness ? Number(thickness) : null,
+        thickness_unit: lengthUnit,        // yeni alan
+
+        // Stok birimi (alan / ağırlık)
+        stock_unit: stockUnit,
+
         carrier_density: carrierDensity ? Number(carrierDensity) : null,
-        length_unit: lengthUnit,
       };
 
       const res = await api.post("/masters", payload);
@@ -812,30 +851,39 @@ function MasterInlineForm({ onSaved, onCancel }: MasterInlineFormProps) {
 
         <div>
           <Label>
-            Stok Ölçü Birimi <span className="text-red-500">*</span>
+            Stok Birimi <span className="text-red-500">*</span>
           </Label>
           <Select
-            options={lengthUnitOptions}
-            value={lengthUnit}
-            onChange={(v: string) => setLengthUnit(v as "m" | "um")}
-            placeholder="Metre / Mikron"
+            options={stockUnitOptions}
+            value={stockUnit}
+            onChange={(v: string) => setStockUnit(v as StockUnit)}
+            placeholder="Alan (m²) / Ağırlık (kg) / Uzunluk (m) / Adet (EA)"
           />
         </div>
       </div>
-
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div>
           <Label>
-            Kalınlık (µm) <span className="text-red-500">*</span>
+            Kalınlık <span className="text-red-500">*</span>
           </Label>
-          <Input
-            type="number"
-            min="0"
-            value={thickness}
-            onChange={(e) => setThickness(e.target.value)}
-            placeholder="Opsiyonel"
-          />
+          <div className="grid grid-cols-2 gap-2">
+            <Input
+              type="number"
+              min="0"
+              className="w-full"
+              value={thickness}
+              onChange={(e) => setThickness(e.target.value)}
+              placeholder={lengthUnit === "m" ? "metre" : "µm"}
+            />
+            <Select
+              options={thicknessUnitOptions}
+              value={lengthUnit}
+              onChange={(v: string) => setLengthUnit(v as ThicknessUnit)}
+              placeholder="m / µm"
+            />
+          </div>
         </div>
+
         <div>
           <Label>
             Taşıyıcı Yoğunluk <span className="text-red-500">*</span>
@@ -898,6 +946,8 @@ function MasterInlineForm({ onSaved, onCancel }: MasterInlineFormProps) {
   );
 }
 
+// EMPTY_SELECT_OPTION'ı kaldırıp her Select'e direkt placeholder verelim
+
 /* ============= STOCK ROW COMPONENT ============= */
 interface StockRowProps {
   row: Row;
@@ -918,14 +968,16 @@ function StockRow({
   onDelete,
   ensureLocations,
 }: StockRowProps) {
-  const locationOptions = useMemo(() => {
+  const locationOptions = useMemo(() => {      
     const wh = row.warehouse_id || "";
     const locations = wh ? locationsByWarehouse[Number(wh)] || [] : [];
-    return [
-      EMPTY_SELECT_OPTION,
-      ...locations.map((l) => createSelectOption(l.id, l.name)),
-    ];
+    return locations.map((l) => createSelectOption(l.id, l.name));
   }, [row.warehouse_id, locationsByWarehouse]);
+
+  const stockUnit = row.stock_unit || "area";
+  const isArea = stockUnit === "area";
+  const isWeight = stockUnit === "weight";
+  const isLength = stockUnit === "length";
 
   const handleWarehouseChange = async (val: string) => {
     const locs = await ensureLocations(val);
@@ -935,17 +987,27 @@ function StockRow({
     onUpdate(row.id, { warehouse_id: val, location_id: nextLocId });
   };
 
-  const unitLabel =
-    row.length_unit === "um" ? "µm" : row.length_unit === "m" ? "m" : "";
-
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+    <div className="rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800 p-4">
       {/* Mobile: Card Layout */}
       <div className="block md:hidden">
         <div className="mb-3 flex items-center justify-between gap-2">
           <div className="flex-1">
-            <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-              {row.display_label}
+            <div className="flex flex-col">
+              <span
+                className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate"
+                title={row.bimeks_product_name || row.display_label}
+              >
+                {row.bimeks_product_name || row.display_label}
+              </span>
+              {row.bimeks_code && (
+                <span
+                  className="mt-0.5 text-xs font-mono text-gray-500 dark:text-gray-400 truncate"
+                  title={row.bimeks_code}
+                >
+                  {row.bimeks_code}
+                </span>
+              )}
             </div>
           </div>
           <div className="flex gap-2">
@@ -988,23 +1050,46 @@ function StockRow({
               />
             </div>
             <div>
-              <Label>En</Label>
+              <Label>En (m)</Label>
               <Input
                 type="number"
                 min="0"
                 value={row.width || ""}
                 onChange={(e) => onUpdate(row.id, { width: e.target.value })}
-                placeholder={unitLabel || "Opsiyonel"}
+                disabled={!isArea}
               />
             </div>
             <div>
-              <Label>Boy</Label>
+              <Label>Boy (m)</Label>
               <Input
                 type="number"
                 min="0"
                 value={row.height || ""}
                 onChange={(e) => onUpdate(row.id, { height: e.target.value })}
-                placeholder={unitLabel || "Opsiyonel"}
+                disabled={!isArea}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label>Ağırlık (kg)</Label>
+              <Input
+                type="number"
+                min="0"
+                value={row.weight || ""}
+                onChange={(e) => onUpdate(row.id, { weight: e.target.value })}
+                disabled={!isWeight}
+              />
+            </div>
+            <div>
+              <Label>Uzunluk (m)</Label>
+              <Input
+                type="number"
+                min="0"
+                value={row.length || ""}
+                onChange={(e) => onUpdate(row.id, { length: e.target.value })}
+                disabled={!isLength}
               />
             </div>
           </div>
@@ -1014,7 +1099,7 @@ function StockRow({
             <Select
               options={warehouseOptions}
               value={row.warehouse_id || ""}
-              placeholder="Seçiniz"
+              placeholder="Depo Seçiniz"
               onChange={handleWarehouseChange}
             />
           </div>
@@ -1024,7 +1109,7 @@ function StockRow({
             <Select
               options={locationOptions}
               value={row.location_id || ""}
-              placeholder="Seçiniz"
+              placeholder="Lokasyon Seçiniz"
               onChange={(val: string) =>
                 onUpdate(row.id, { location_id: val })
               }
@@ -1045,97 +1130,126 @@ function StockRow({
         </div>
       </div>
 
-      {/* Desktop: Grid Layout */}
+      {/* Desktop: 6 kolonlu Excel düzeni */}
       <div className="hidden md:block">
-        {/* Data Row - Everything aligned with items-center */}
-        <div className="grid grid-cols-[3.5fr_minmax(100px,0.6fr)_minmax(96px,0.55fr)_minmax(96px,0.55fr)_minmax(140px,0.8fr)_minmax(140px,0.8fr)_minmax(140px,0.8fr)_minmax(90px,0.4fr)] items-center gap-4 px-4">
-          {/* Display Label */}
-          <div
-            className="text-sm font-medium text-gray-700 dark:text-gray-200 truncate"
-            title={row.display_label}
-          >
-            {row.display_label}
-          </div>
-
-          {/* Quantity */}
-          <Input
-            type="number"
-            min="1"
-            className="w-full"
-            value={String(row.qty)}
-            onChange={(e) =>
-              onUpdate(row.id, {
-                qty: Math.max(1, parseInt(e.target.value || "1", 10)),
-              })
-            }
-          />
-
-          {/* Width */}
-          <Input
-            type="number"
-            min="0"
-            className="w-full"
-            value={row.width || ""}
-            onChange={(e) => onUpdate(row.id, { width: e.target.value })}
-            placeholder={unitLabel || "Opsiyonel"}
-          />
-
-          {/* Height */}
-          <Input
-            type="number"
-            min="0"
-            className="w-full"
-            value={row.height || ""}
-            onChange={(e) => onUpdate(row.id, { height: e.target.value })}
-            placeholder={unitLabel || "Opsiyonel"}
-          />
-
-          {/* Warehouse */}
-          <Select
-            options={warehouseOptions}
-            value={row.warehouse_id || ""}
-            placeholder="Seçiniz"
-            onChange={handleWarehouseChange}
-          />
-
-          {/* Location */}
-          <Select
-            options={locationOptions}
-            value={row.location_id || ""}
-            placeholder="Seçiniz"
-            onChange={(val: string) => onUpdate(row.id, { location_id: val })}
-          />
-
-          {/* Invoice */}
-          <Input
-            type="text"
-            value={row.invoice_no || ""}
-            onChange={(e) => onUpdate(row.id, { invoice_no: e.target.value })}
-            placeholder="Opsiyonel"
-          />
-
-          {/* Actions */}
-          <div className="flex items-center justify-end gap-2">
+        <div className="space-y-2">
+          {/* Satır 1: ÜRÜN ADI | ADET | EN | BOY | DEPO | + */}
+          <div className="grid grid-cols-[2.5fr_1fr_1fr_1fr_1.5fr_auto] gap-2 items-center">
+            {/* Kolon 1: Bimeks Ürün Adı */}
+            <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate" title={row.bimeks_product_name || row.display_label}>
+              {row.bimeks_product_name || row.display_label}
+            </div>
+            
+            {/* Kolon 2: Adet */}
+            <div className="relative">
+              <Input
+                type="number"
+                min="1"
+                value={String(row.qty)}
+                onChange={(e) =>
+                  onUpdate(row.id, {
+                    qty: Math.max(1, parseInt(e.target.value || "1", 10)),
+                  })
+                }
+                className="pr-8"
+              />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400 pointer-events-none">
+                Ad.
+              </span>
+            </div>
+            
+            {/* Kolon 3: En */}
+            <Input
+              type="number"
+              min="0"
+              step="0.01"
+              value={row.width || ""}
+              onChange={(e) => onUpdate(row.id, { width: e.target.value })}
+              placeholder="En (m)"
+              disabled={!isArea}
+            />
+            
+            {/* Kolon 4: Boy */}
+            <Input
+              type="number"
+              min="0"
+              step="0.01"
+              value={row.height || ""}
+              onChange={(e) => onUpdate(row.id, { height: e.target.value })}
+              placeholder="Boy (m)"
+              disabled={!isArea}
+            />
+            
+            {/* Kolon 5: Depo */}
+            <Select
+              options={warehouseOptions}
+              value={row.warehouse_id || ""}
+              placeholder="Depo Seçiniz"
+              onChange={handleWarehouseChange}
+            />
+            
+            {/* Kolon 6: + Butonu */}
             <Button
               variant="outline"
               className="h-10 w-10 p-0"
               onClick={() => onClone(row.id)}
             >
-              <span title="Klonla" aria-hidden>
-                +
-              </span>
-              <span className="sr-only">Klonla</span>
+              <span aria-hidden>+</span>
             </Button>
+          </div>
 
+          {/* Satır 2: ÜRÜN KODU | FATURA NO | AĞIRLIK | UZUNLUK | LOKASYON | - */}
+          <div className="grid grid-cols-[2.5fr_1fr_1fr_1fr_1.5fr_auto] gap-2 items-center">
+            {/* Kolon 1: Bimeks Kodu */}
+            <div className="text-sm font-medium text-gray-600 dark:text-gray-400 truncate" title={row.bimeks_code || ""}>
+              {row.bimeks_code || "-"}
+            </div>
+            
+            {/* Kolon 2: Fatura No */}
+            <Input
+              type="text"
+              value={row.invoice_no || ""}
+              onChange={(e) => onUpdate(row.id, { invoice_no: e.target.value })}
+              placeholder="Fatura No"
+            />
+            
+            {/* Kolon 3: Ağırlık */}
+            <Input
+              type="number"
+              min="0"
+              step="0.01"
+              value={row.weight || ""}
+              onChange={(e) => onUpdate(row.id, { weight: e.target.value })}
+              placeholder="Ağırlık (kg)"
+              disabled={!isWeight}
+            />
+            
+            {/* Kolon 4: Uzunluk */}
+            <Input
+              type="number"
+              min="0"
+              step="0.01"
+              value={row.length || ""}
+              onChange={(e) => onUpdate(row.id, { length: e.target.value })}
+              placeholder="Uzunluk (m)"
+              disabled={!isLength}
+            />
+            
+            {/* Kolon 5: Lokasyon */}
+            <Select
+              options={locationOptions}
+              value={row.location_id || ""}
+              placeholder="Lokasyon Seçiniz"
+              onChange={(val: string) => onUpdate(row.id, { location_id: val })}
+            />
+            
+            {/* Kolon 6: - Butonu */}
             <Button
               variant="outline"
               className="h-10 w-10 p-0"
               onClick={() => onDelete(row.id)}
             >
-              <span title="Sil" aria-hidden>
-                -
-              </span>
-              <span className="sr-only">Sil</span>
+              <span aria-hidden>-</span>
             </Button>
           </div>
         </div>
@@ -1358,28 +1472,43 @@ export default function StockEntryPage() {
   }, []);
 
   const handleApplySelections = useCallback(() => {
-    const currentMasterIds = new Set(rows.map((r) => String(r.master_id)));
-    const toAdd = selectedMasterIds.filter((id) => !currentMasterIds.has(id));
+  const currentMasterIds = new Set(rows.map((r) => String(r.master_id)));
+  const toAdd = selectedMasterIds.filter((id) => !currentMasterIds.has(id));
 
-    const newRows: Row[] = toAdd.map((id) => {
-      const master = filteredMasters.find((m) => String(m.id) === id)!;
+  const newRows: Row[] = toAdd.map((id) => {
+  const master = filteredMasters.find((m) => String(m.id) === id)!;
 
-      // Sadece Bimeks kodu göster
-      const display = master.bimeks_code || master.display_label || `#${master.id}`;
+  const name =
+    master.bimeks_product_name ||
+    master.display_label ||
+    `#${master.id}`;
 
-      return {
-        id: uid(),
-        master_id: master.id,
-        display_label: display,
-        qty: 1,
-        width: "",
-        height: "",
-        warehouse_id: "",
-        location_id: "",
-        invoice_no: globalSettings.invoice || "",
-        length_unit: master.length_unit,
-      };
-    });
+  const code = master.bimeks_code || "";
+
+  const display = code || name;
+
+  return {
+      id: uid(),
+      master_id: master.id,
+      display_label: display,
+      qty: 1,
+
+      width: "",
+      height: "",
+      weight: "",    // 🔹 yeni
+      length: "",    // 🔹 yeni
+
+      warehouse_id: "",
+      location_id: "",
+      invoice_no: globalSettings.invoice || "",
+
+      thickness_unit: master.thickness_unit as ThicknessUnit | undefined,
+      stock_unit: master.stock_unit as StockUnit | undefined, // 🔹 master’dan miras
+
+      bimeks_code: code,
+      bimeks_product_name: name,
+    };
+  });
 
     const mastersToKeep = new Set(selectedMasterIds);
     const rowsAfterRemoval = rows.filter((r) =>
@@ -1402,6 +1531,7 @@ export default function StockEntryPage() {
       });
     }, 0);
   }, [rows, selectedMasterIds, filteredMasters, globalSettings.invoice]);
+
 
   const updateRow = useCallback((id: string, updates: Partial<Row>) => {
     setRows((prev) =>
@@ -1466,37 +1596,69 @@ export default function StockEntryPage() {
     }
 
     // 🔴 En / boy zorunlu kontrolü
+    // 🔴 Ölçü alanları zorunlu kontrolü (stok birimine göre)
     const dimErrors: string[] = [];
+
     rows.forEach((r, idx) => {
+      const master = mastersRaw.find((m) => m.id === r.master_id);
+      const stockUnit = (master?.stock_unit || "area") as StockUnit;
+
       const w =
         r.width !== undefined && r.width !== null && r.width !== ""
           ? Number(r.width)
           : NaN;
+
       const h =
         r.height !== undefined && r.height !== null && r.height !== ""
           ? Number(r.height)
           : NaN;
 
-      if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
-        dimErrors.push(String(idx + 1)); // 1-based satır numarası
+      const weight =
+        r.weight !== undefined && r.weight !== null && r.weight !== ""
+          ? Number(r.weight)
+          : NaN;
+
+      const length =
+        r.length !== undefined && r.length !== null && r.length !== ""
+          ? Number(r.length)
+          : NaN;
+
+      if (stockUnit === "area") {
+        if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+          dimErrors.push(String(idx + 1));
+        }
+      } else if (stockUnit === "weight") {
+        if (!Number.isFinite(weight) || weight <= 0) {
+          dimErrors.push(String(idx + 1));
+        }
+      } else if (stockUnit === "length") {
+        if (!Number.isFinite(length) || length <= 0) {
+          dimErrors.push(String(idx + 1));
+        }
+      } else if (stockUnit === "unit") {
+        // Adet birimi → ekstra ölçü zorunluluğu yok, sadece qty>=1 kontrolü yeterli.
+        // Burada dimErrors'a bir şey eklemiyoruz.
       }
     });
+
 
     if (dimErrors.length) {
       showAlert({
         variant: "warning",
-        title: "En / boy eksik veya hatalı",
+        title: "Ölçü alanı eksik veya hatalı",
         message:
-          "Şu satırlarda en ve boy zorunludur ve 0'dan büyük olmalıdır: " +
+          "Şu satırlarda stok birimine göre ölçü alanları zorunludur ve 0'dan büyük olmalıdır: " +
           dimErrors.join(", "),
       });
       return;
     }
 
+
     const payload: any[] = [];
     rows.forEach((r) => {
       const master = mastersRaw.find((m) => m.id === r.master_id);
       const unit = (master?.default_unit || "EA") as "EA" | "M" | "KG";
+      const stockUnit = (master?.stock_unit || "area") as StockUnit;
 
       const width =
         r.width !== undefined && r.width !== null && r.width !== ""
@@ -1508,6 +1670,16 @@ export default function StockEntryPage() {
           ? Number(r.height)
           : null;
 
+      const weight =
+        r.weight !== undefined && r.weight !== null && r.weight !== ""
+          ? Number(r.weight)
+          : null;
+
+      const length =
+        r.length !== undefined && r.length !== null && r.length !== ""
+          ? Number(r.length)
+          : null;
+
       for (let i = 0; i < Number(r.qty); i++) {
         payload.push({
           master_id: r.master_id,
@@ -1515,12 +1687,18 @@ export default function StockEntryPage() {
           quantity: 1,
           warehouse_id: Number(r.warehouse_id),
           location_id: Number(r.location_id),
-          width,
-          height,
+
+          // stok birimine göre sadece gerekli alanları doldur
+          width: stockUnit === "area" ? width : null,
+          height: stockUnit === "area" ? height : null,
+          weight: stockUnit === "weight" ? weight : null,
+          length: stockUnit === "length" ? length : null,
+
           invoice_no: r.invoice_no?.trim() || null,
         });
       }
     });
+
 
       const res = await api.post("/components/bulk", payload);
 
@@ -1604,7 +1782,7 @@ export default function StockEntryPage() {
           onToggle={(e) =>
             setCreateOpen((e.target as HTMLDetailsElement).open)
           }
-          className="rounded-lg border border-gray-200 p-4 dark:border-gray-700"
+          className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900/40"
         >
           <summary className="cursor-pointer select-none text-sm font-semibold text-gray-800 dark:text-gray-100 hover:text-gray-900 dark:hover:text-white">
             Yeni Tanım Ekle
@@ -1641,8 +1819,8 @@ export default function StockEntryPage() {
         </details>
 
         <div className="mt-4">
-          <Label>Tanım Seçimi (çoklu)</Label>
-          <div className="mt-2 rounded-lg border border-gray-200 dark:border-gray-700">
+          <Label>Tanım Seçimi</Label>
+          <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900/40">
             <div className="border-b border-gray-100 bg-gray-50 px-3 py-3 text-xs dark:border-gray-800 dark:bg-gray-900/40">
               <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1.2fr)_minmax(0,1.6fr)]">
                 <div>
@@ -1697,8 +1875,8 @@ export default function StockEntryPage() {
               </div>
             </div>
 
-            <div className="max-h-64 overflow-auto pr-0">
-              <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-gray-600 dark:border-gray-800 dark:bg-gray-900/60 dark:text-gray-400">
+            <div className="max-h-52 overflow-auto pr-0">
+              <div className="sticky top-0 z-10 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-gray-600 dark:border-gray-800 dark:bg-gray-900/60 dark:text-gray-400">
                 <div className="text-left">Bimeks Ürün Tanımı</div>
                 <div className="text-left">Bimeks Kodu</div>
                 <div className="text-left">Ürün Türü</div>
@@ -1783,69 +1961,47 @@ export default function StockEntryPage() {
           <div ref={rowsSectionRef} />
 
           <div className="grid grid-cols-1 items-end gap-3 md:grid-cols-[1fr_1fr_1fr_auto]">
-            <div>
-              <Label>Fatura No</Label>
-              <Input
-                type="text"
-                value={globalSettings.invoice}
-                onChange={(e) =>
-                  setGlobalSettings((prev) => ({
-                    ...prev,
-                    invoice: e.target.value,
-                  }))
-                }
-                placeholder="Opsiyonel"
-              />
-            </div>
-            <div>
-              <Label>Varsayılan Depo</Label>
-              <Select
-                options={warehouseOptions}
-                value={globalSettings.warehouse}
-                placeholder="Seçiniz"
-                onChange={handleGlobalWarehouseChange}
-              />
-            </div>
-            <div>
-              <Label>Varsayılan Lokasyon</Label>
-              <Select
-                options={globalLocationOptions}
-                value={globalSettings.location}
-                placeholder="Seçiniz"
-                onChange={(val: string) =>
-                  setGlobalSettings((prev) => ({
-                    ...prev,
-                    location: val,
-                  }))
-                }
-              />
-            </div>
-            <div className="flex justify-end md:justify-start">
-              <Button
-                variant="outline"
-                className="w-full md:w-auto"
-                onClick={applyGlobalsToAll}
-              >
-                Tümüne Uygula
-              </Button>
-            </div>
+            <Input
+              type="text"
+              value={globalSettings.invoice}
+              onChange={(e) =>
+                setGlobalSettings((prev) => ({
+                  ...prev,
+                  invoice: e.target.value,
+                }))
+              }
+              placeholder="Fatura No"
+            />
+            <Select
+              options={warehouseOptions.filter(w => w.value !== "")}
+              value={globalSettings.warehouse}
+              placeholder="Depo Seçiniz"
+              onChange={handleGlobalWarehouseChange}
+            />
+            <Select
+              options={globalLocationOptions.filter(l => l.value !== "")}
+              value={globalSettings.location}
+              placeholder="Lokasyon Seçiniz"
+              onChange={(val: string) =>
+                setGlobalSettings((prev) => ({
+                  ...prev,
+                  location: val,
+                }))
+              }
+            />
+            <Button
+              variant="outline"
+              className="w-full md:w-auto"
+              onClick={applyGlobalsToAll}
+            >
+              Tümüne Uygula
+            </Button>
           </div>
 
           <div className="my-4 h-px w-full bg-gray-200 dark:bg-gray-700" />
 
-          {/* Header Row - Desktop Only - Once */}
-          <div className="hidden md:grid md:grid-cols-[3.5fr_minmax(100px,0.6fr)_minmax(96px,0.55fr)_minmax(96px,0.55fr)_minmax(140px,0.8fr)_minmax(140px,0.8fr)_minmax(140px,0.8fr)_minmax(90px,0.4fr)] md:gap-4 mb-3 px-4">
-            <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Ürün</div>
-            <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Adet</div>
-            <div className="text-sm font-medium text-gray-700 dark:text-gray-300">En</div>
-            <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Boy</div>
-            <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Depo</div>
-            <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Lokasyon</div>
-            <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Fatura No</div>
-            <div></div>
-          </div>
-
-          <div className="space-y-4">
+          {/* Rows - header yok artık, sadece kartlar */}
+          <div className="mt-4 space-y-4">
             {rows.map((row) => (
               <StockRow
                 key={row.id}
@@ -1871,7 +2027,6 @@ export default function StockEntryPage() {
           </div>
         </ComponentCard>
       )}
-
       <div ref={alertRef} className="mt-4">
         {uiAlert && (
           <Alert

@@ -40,19 +40,7 @@ export default function UserDropdown({ me = null }: { me?: Me | null }) {
         onClick={toggleDropdown}
         className="flex items-center text-gray-700 dropdown-toggle dark:text-gray-400"
       >
-        <span className="mr-3 overflow-hidden rounded-full h-11 w-11 bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
-          <svg
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            className="text-gray-600 dark:text-gray-300"
-            fill="currentColor"
-          >
-            <path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5Z" />
-            <path d="M4 20a8 8 0 0 1 16 0Z" />
-          </svg>
-        </span>
-
+        
         {/* Üst bar: full name (yoksa username) */}
         <span className="block mr-1 font-medium text-theme-sm">{displayName}</span>
 

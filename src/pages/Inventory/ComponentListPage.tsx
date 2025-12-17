@@ -10,49 +10,79 @@ import api from "../../services/api";
 import { Link } from "react-router-dom";
 import * as XLSX from "xlsx";
 
+type StockUnit = "area" | "weight" | "length" | "unit" | string;
+
 type Row = {
   id: number;
   barcode: string;
+
   status?: string | null;
+
   warehouse?: { id: number; name: string };
   location?: { id: number; name: string };
+
   master?: {
     id: number;
     bimeks_product_name?: string | null;
     bimeks_code?: string | null;
+    stock_unit?: StockUnit | null; // area / weight / length / unit
   };
+
   width?: number | null;
   height?: number | null;
   area?: number | null;
+
+  weight?: number | null;
+  length?: number | null;
+
   created_by?: number | null;
   approved_by?: number | null;
+
   created_by_user?: { id: number; username?: string; full_name?: string } | null;
-  approved_by_user?: {
-    id: number;
-    username?: string;
-    full_name?: string;
-  } | null;
+  approved_by_user?: { id: number; username?: string; full_name?: string } | null;
+
   created_at?: string;
   updated_at?: string;
   approved_at?: string | null;
+
   notes?: string | null;
   invoice_no?: string | null;
 };
 
+const dash = <span className="text-gray-400 dark:text-gray-500">—</span>;
+
+function normalizeUnit(u?: string | null): string {
+  return (u || "").toString().trim().toLowerCase();
+}
+
 function exportToExcel(rows: Row[]) {
-  const data = rows.map((r) => ({
-    Tip: "Komponent", // bu sayfada hep komponent
-    Barkod: r.barcode,
-    Tanım: r.master?.bimeks_product_name ?? "",
-    En: r.width ?? "",
-    Boy: r.height ?? "",
-    Alan: r.area ?? "",
-    Depo: r.warehouse?.name ?? "",
-    Lokasyon: r.location?.name ?? "",
-    "Fatura No": r.invoice_no ?? "",
-    Durum: r.status ?? "",
-    Güncelleme: r.updated_at ? new Date(r.updated_at).toLocaleString() : "",
-  }));
+  const data = rows.map((r) => {
+    const unit = normalizeUnit(r.master?.stock_unit);
+
+    const en = unit === "area" ? r.width ?? "" : "";
+    const boy = unit === "area" ? r.height ?? "" : "";
+    const alan = unit === "area" ? r.area ?? "" : "";
+    const uzunluk = unit === "length" ? r.length ?? "" : "";
+    const agirlik = unit === "weight" ? r.weight ?? "" : "";
+
+    return {
+      Tip: "Komponent",
+      Barkod: r.barcode,
+      "Tanım": r.master?.bimeks_product_name ?? "",
+      "Bimeks Kodu": r.master?.bimeks_code ?? "",
+      "Birim": unit || "",
+      En: en,
+      Boy: boy,
+      Alan: alan,
+      Uzunluk: uzunluk,
+      "Ağırlık": agirlik,
+      Depo: r.warehouse?.name ?? "",
+      Lokasyon: r.location?.name ?? "",
+      "Fatura No": r.invoice_no ?? "",
+      Durum: r.status ?? "",
+      Güncelleme: r.updated_at ? new Date(r.updated_at).toLocaleString() : "",
+    };
+  });
 
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(data);
@@ -66,15 +96,26 @@ export default function ComponentListPage() {
   const [warehouse, setWarehouse] = useState("");
   const [master, setMaster] = useState("");
   const [statusId, setStatusId] = useState("");
-  const [warehouses, setWarehouses] = useState<{ id: number; name: string }[]>(
-    []
-  );
+  const unitLabel = (u?: string | null) => {
+  switch ((u || "").toLowerCase()) {
+    case "unit": return "Adet";
+    case "length": return "Uzunluk";
+    case "weight": return "Ağırlık";
+    case "area": return "Alan";
+    default: return "-";
+  }
+};
+
+
+  const [warehouses, setWarehouses] = useState<{ id: number; name: string }[]>([]);
   const [masters, setMasters] = useState<{ id: number; bimeks_product_name?: string }[]>([]);
+
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     api.get("/lookups/warehouses").then((r) => setWarehouses(r.data || []));
   }, []);
+
   useEffect(() => {
     api.get("/masters").then((r) => setMasters(r.data || []));
   }, []);
@@ -87,7 +128,7 @@ export default function ComponentListPage() {
           search: q || undefined,
           warehouseId: warehouse || undefined,
           masterId: master || undefined,
-          statusId: statusId || undefined, // 👈 EKLE
+          statusId: statusId || undefined,
         },
       });
       setRows(res.data || []);
@@ -95,43 +136,48 @@ export default function ComponentListPage() {
       setLoading(false);
     }
   };
+
   useEffect(() => {
     fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const warehouseOptions = useMemo(
-    () => [
-      { value: "", label: "Depo (tümü)" },
-      ...warehouses.map((w) => ({ value: String(w.id), label: w.name })),
-    ],
+    () => [{ value: "", label: "Depo (tümü)" }, ...warehouses.map((w) => ({ value: String(w.id), label: w.name }))],
     [warehouses]
   );
 
   const masterOptions = useMemo(
     () => [
       { value: "", label: "Tanım (tümü)" },
-      ...masters.map((m) => ({
-        value: String(m.id),
-        label: m.bimeks_product_name || `#${m.id}`,
-      })),
+      ...masters.map((m) => ({ value: String(m.id), label: m.bimeks_product_name || `#${m.id}` })),
     ],
     [masters]
   );
 
   const statusOptions = useMemo(
-  () => [
-    { value: "", label: "Durum (tümü)" },
-    { value: "1", label: "Stokta" },        // STATUS.in_stock
-    { value: "4", label: "Beklemede" },     // STATUS.pending
-    { value: "2", label: "Kullanıldı" },    // STATUS.used
-    { value: "3", label: "Satıldı" },       // STATUS.sold
-    { value: "5", label: "Hasarlı/Kayıp" }, // STATUS.damaged_lost
-    { value: "6", label: "Üretimde" },      // STATUS.production
-    { value: "7", label: "Baskıda" },       // STATUS.screenprint
-  ],
-  []
-);
+    () => [
+      { value: "", label: "Durum (tümü)" },
+      { value: "1", label: "Stokta" },
+      { value: "4", label: "Beklemede" },
+      { value: "2", label: "Kullanıldı" },
+      { value: "3", label: "Satıldı" },
+      { value: "5", label: "Hasarlı/Kayıp" },
+      { value: "6", label: "Üretimde" },
+      { value: "7", label: "Baskıda" },
+    ],
+    []
+  );
+
+  // ✅ stock_unit'e göre alanları göster
+  const renderWidth = (r: Row) => (normalizeUnit(r.master?.stock_unit) === "area" ? (r.width ?? dash) : dash);
+  const renderHeight = (r: Row) => (normalizeUnit(r.master?.stock_unit) === "area" ? (r.height ?? dash) : dash);
+  const renderArea = (r: Row) => (normalizeUnit(r.master?.stock_unit) === "area" ? (r.area ?? dash) : dash);
+
+  const renderWeight = (r: Row) => (normalizeUnit(r.master?.stock_unit) === "weight" ? (r.weight ?? dash) : dash);
+  const renderLength = (r: Row) => (normalizeUnit(r.master?.stock_unit) === "length" ? (r.length ?? dash) : dash);
+
+  const renderStatus = (r: Row) => r.status ?? dash;
 
   return (
     <div className="space-y-6">
@@ -141,29 +187,13 @@ export default function ComponentListPage() {
       <ComponentCard title="Filtreler">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr_1fr_auto_auto]">
           <Input
-            placeholder="Ara (barkod, tanım…)"
+            placeholder="Ara (barkod, tanım, bimeks kodu…)"
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
-          <Select
-            options={warehouseOptions}
-            value={warehouse}
-            onChange={setWarehouse}
-            placeholder="Depo"
-          />
-          <Select
-            options={masterOptions}
-            value={master}
-            onChange={setMaster}
-            placeholder="Tanım"
-          />
-          {/* YENİ: Durum filtresi */}
-          <Select
-            options={statusOptions}
-            value={statusId}
-            onChange={setStatusId}
-            placeholder="Durum"
-          />
+          <Select options={warehouseOptions} value={warehouse} onChange={setWarehouse} placeholder="Depo" />
+          <Select options={masterOptions} value={master} onChange={setMaster} placeholder="Tanım" />
+          <Select options={statusOptions} value={statusId} onChange={setStatusId} placeholder="Durum" />
           <Button variant="primary" onClick={fetchData}>
             Uygula
           </Button>
@@ -181,9 +211,13 @@ export default function ComponentListPage() {
                 {[
                   "Barkod",
                   "Tanım",
+                  "Bimeks Kodu",
+                  "Ölçü Birimi",
                   "En",
                   "Boy",
                   "Alan",
+                  "Ağırlık",
+                  "Uzunluk",
                   "Durum",
                   "Depo",
                   "Lokasyon",
@@ -195,22 +229,17 @@ export default function ComponentListPage() {
                   "Onay Tarihi",
                   "Notlar",
                 ].map((h) => (
-                  <th
-                    key={h}
-                    className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400"
-                  >
+                  <th key={h} className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
                     {h}
                   </th>
                 ))}
               </tr>
             </thead>
+
             <tbody>
               {loading ? (
                 <tr>
-                  <td
-                    className="px-4 py-6 text-gray-500 dark:text-gray-400"
-                    colSpan={15}
-                  >
+                  <td className="px-4 py-6 text-gray-500 dark:text-gray-400" colSpan={18}>
                     Yükleniyor…
                   </td>
                 </tr>
@@ -221,121 +250,56 @@ export default function ComponentListPage() {
                     className="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-white/5"
                   >
                     <td className="px-4 py-3">
-                      <Link
-                        to={`/details/component/${r.id}`}
-                        className="text-brand-600 hover:underline dark:text-brand-400"
-                      >
+                      <Link to={`/details/component/${r.id}`} className="text-brand-600 hover:underline dark:text-brand-400">
                         {r.barcode}
                       </Link>
                     </td>
 
                     <td className="px-4 py-3 min-w-[240px]">
                       {r.master?.bimeks_product_name ? (
-                        <Link
-                          to={`/details/component/${r.id}`}
-                          className="text-brand-600 hover:underline dark:text-brand-400"
-                        >
+                        <Link to={`/details/component/${r.id}`} className="text-brand-600 hover:underline dark:text-brand-400">
                           {r.master.bimeks_product_name}
                         </Link>
                       ) : (
-                        <span className="text-gray-400 dark:text-gray-500">—</span>
+                        dash
                       )}
                     </td>
 
+                    <td className="px-4 py-3 whitespace-nowrap">{r.master?.bimeks_code ? r.master.bimeks_code : dash}</td>
+                    <td className="px-4 py-3 font-medium">{unitLabel(r.master?.stock_unit)}</td>
+
+                    <td className="px-4 py-3">{renderWidth(r)}</td>
+                    <td className="px-4 py-3">{renderHeight(r)}</td>
+                    <td className="px-4 py-3">{renderArea(r)}</td>
+                    <td className="px-4 py-3">{renderWeight(r)}</td>
+                    <td className="px-4 py-3">{renderLength(r)}</td>
+
+                    <td className="px-4 py-3">{renderStatus(r)}</td>
+                    <td className="px-4 py-3">{r.warehouse?.name ?? dash}</td>
+                    <td className="px-4 py-3">{r.location?.name ?? dash}</td>
+
+                    <td className="px-4 py-3">{r.invoice_no ?? dash}</td>
+
                     <td className="px-4 py-3">
-                      {r.width ?? (
-                        <span className="text-gray-400 dark:text-gray-500">—</span>
-                      )}
+                      {r.created_by_user?.full_name ?? r.created_by_user?.username ?? r.created_by ?? dash}
                     </td>
 
                     <td className="px-4 py-3">
-                      {r.height ?? (
-                        <span className="text-gray-400 dark:text-gray-500">—</span>
-                      )}
+                      {r.approved_by_user?.full_name ?? r.approved_by_user?.username ?? r.approved_by ?? dash}
                     </td>
 
-                    <td className="px-4 py-3">
-                      {r.area ?? (
-                        <span className="text-gray-400 dark:text-gray-500">—</span>
-                      )}
-                    </td>
+                    <td className="px-4 py-3">{r.created_at ? new Date(r.created_at).toLocaleString() : dash}</td>
 
-                    <td className="px-4 py-3">
-                      {r.status ?? (
-                        <span className="text-gray-400 dark:text-gray-500">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {r.warehouse?.name ?? (
-                        <span className="text-gray-400 dark:text-gray-500">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {r.location?.name ?? (
-                        <span className="text-gray-400 dark:text-gray-500">—</span>
-                      )}
-                    </td>
+                    <td className="px-4 py-3">{r.updated_at ? new Date(r.updated_at).toLocaleString() : dash}</td>
 
-                    <td className="px-4 py-3">
-                      {r.invoice_no ?? (
-                        <span className="text-gray-400 dark:text-gray-500">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {r.created_by_user?.full_name ??
-                        r.created_by_user?.username ??
-                        r.created_by ??
-                        (
-                          <span className="text-gray-400 dark:text-gray-500">
-                            —
-                          </span>
-                        )}
-                    </td>
+                    <td className="px-4 py-3">{r.approved_at ? new Date(r.approved_at).toLocaleString() : dash}</td>
 
-                    <td className="px-4 py-3">
-                      {r.approved_by_user?.full_name ??
-                        r.approved_by_user?.username ??
-                        r.approved_by ??
-                        (
-                          <span className="text-gray-400 dark:text-gray-500">
-                            —
-                          </span>
-                        )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {r.created_at ? (
-                        new Date(r.created_at).toLocaleString()
-                      ) : (
-                        <span className="text-gray-400 dark:text-gray-500">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {r.updated_at ? (
-                        new Date(r.updated_at).toLocaleString()
-                      ) : (
-                        <span className="text-gray-400 dark:text-gray-500">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {r.approved_at ? (
-                        new Date(r.approved_at).toLocaleString()
-                      ) : (
-                        <span className="text-gray-400 dark:text-gray-500">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {r.notes ?? (
-                        <span className="text-gray-400 dark:text-gray-500">—</span>
-                      )}
-                    </td>
+                    <td className="px-4 py-3">{r.notes ?? dash}</td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td
-                    className="px-4 py-6 text-gray-500 dark:text-gray-400"
-                    colSpan={15}
-                  >
+                  <td className="px-4 py-6 text-gray-500 dark:text-gray-400" colSpan={18}>
                     Kayıt bulunamadı
                   </td>
                 </tr>

@@ -11,7 +11,7 @@ import Input from "../../components/form/input/InputField";
 import Select from "../../components/form/Select";
 import Button from "../../components/ui/button/Button";
 
-// YENİ: merkezi transition formatlayıcı
+// merkezi transition formatlayıcı
 import {
   formatTransitionTR,
   type TransitionRow as TLRow,
@@ -24,11 +24,11 @@ type MasterMini = {
   id: number;
   name?: string | null;
   display_label?: string | null;
-  bimeks_product_name?: string | null; // 👈 yeni
+  bimeks_product_name?: string | null;
   bimeks_code?: string | null;
-  length_unit?: string | null;
+  stock_unit?: string | null; // ✅ önemli (area/weight/length/unit)
+  thickness_unit?: string | null;
 };
-
 
 /* ---------- Status ---------- */
 type StatusOpt = { value: number; label: string };
@@ -43,7 +43,9 @@ export default function ComponentDetailPage() {
   /* ------ lookups ------ */
   const [statuses, setStatuses] = useState<StatusOpt[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [locationsByWarehouse, setLocationsByWarehouse] = useState<Record<number, Location[]>>({});
+  const [locationsByWarehouse, setLocationsByWarehouse] = useState<
+    Record<number, Location[]>
+  >({});
   const [masters, setMasters] = useState<MasterMini[]>([]);
 
   /* ------ component state ------ */
@@ -55,11 +57,46 @@ export default function ComponentDetailPage() {
   const [invoiceNo, setInvoiceNo] = useState("");
   const [notes, setNotes] = useState("");
 
+  // 5 değer alanı
   const [width, setWidth] = useState<number | "">("");
   const [height, setHeight] = useState<number | "">("");
-  const [area, setArea] = useState<number | "">(""); // 👈 yeni
-  // en / boy değişince alanı canlı hesapla
+  const [area, setArea] = useState<number | "">(""); // otomatik
+  const [weight, setWeight] = useState<number | "">("");
+  const [length, setLength] = useState<number | "">("");
+
+  // master meta
+  const [masterCode, setMasterCode] = useState<string>("");
+  const [masterStockUnit, setMasterStockUnit] = useState<string>(""); // area/weight/length/unit
+  const [masterUnitLabel, setMasterUnitLabel] = useState<string>(""); // Alan / Ağırlık / Uzunluk / Adet
+
+  /* ------ ölçü birimi -> aktif alanlar ------ */
+  const isArea = masterStockUnit === "area";
+  const isWeight = masterStockUnit === "weight";
+  const isLength = masterStockUnit === "length";
+  const isUnit = masterStockUnit === "unit";
+
+  const widthEnabled = isArea;
+  const heightEnabled = isArea;
+  const weightEnabled = isWeight;
+  const lengthEnabled = isLength;
+
+  // stock_unit değişince pasif kalanları temizle
   useEffect(() => {
+    if (!isArea) {
+      setWidth("");
+      setHeight("");
+      setArea("");
+    }
+    if (!isWeight) setWeight("");
+    if (!isLength) setLength("");
+    // unit ise zaten hepsi pasif olacak
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [masterStockUnit]);
+
+  // en/boy değişince alanı canlı hesapla (sadece area modunda)
+  useEffect(() => {
+    if (!isArea) return;
+
     if (width === "" || height === "") {
       setArea("");
       return;
@@ -74,39 +111,58 @@ export default function ComponentDetailPage() {
     }
 
     setArea(w * h);
-  }, [width, height]);
-
-    const [masterCode, setMasterCode] = useState<string>(""); // 👈 YENİ
-    const [masterUnitLabel, setMasterUnitLabel] = useState<string>(""); // 👈 yeni
-
+  }, [width, height, isArea]);
 
   /* ------ seçenekler ------ */
   const warehouseOptions = useMemo(
-    () => [{ value: "", label: "Seçiniz", disabled: true }, ...warehouses.map((w) => ({ value: String(w.id), label: w.name }))],
+    () => [
+      { value: "", label: "Seçiniz", disabled: true },
+      ...warehouses.map((w) => ({ value: String(w.id), label: w.name })),
+    ],
     [warehouses]
   );
+
   const locationOptions = useMemo(() => {
-    const list = warehouseId ? locationsByWarehouse[Number(warehouseId)] || [] : [];
-    return [{ value: "", label: "Seçiniz", disabled: true }, ...list.map((l) => ({ value: String(l.id), label: l.name }))];
+    const list = warehouseId
+      ? locationsByWarehouse[Number(warehouseId)] || []
+      : [];
+    return [
+      { value: "", label: "Seçiniz", disabled: true },
+      ...list.map((l) => ({ value: String(l.id), label: l.name })),
+    ];
   }, [warehouseId, locationsByWarehouse]);
-  
+
   /* ------ helpers ------ */
   const ensureLocations = async (wh: number | "") => {
     const w = Number(wh || 0);
     if (!w || locationsByWarehouse[w]) return;
     try {
-      const { data } = await api.get(`/lookups/locations`, { params: { warehouseId: w } });
+      const { data } = await api.get(`/lookups/locations`, {
+        params: { warehouseId: w },
+      });
       setLocationsByWarehouse((prev) => ({ ...prev, [w]: data || [] }));
     } catch (e) {
       console.error("locations load error", e);
     }
   };
 
+  const unitLabelTR = (su: string) => {
+    const v = (su || "").toLowerCase();
+    if (v === "area") return "Alan";
+    if (v === "weight") return "Ağırlık";
+    if (v === "length") return "Uzunluk";
+    if (v === "unit") return "Adet";
+    return v;
+  };
+
   /* ------ lookups yükle ------ */
   useEffect(() => {
     (async () => {
       try {
-        const [whRes, mastersRes] = await Promise.all([api.get("/lookups/warehouses"), api.get("/masters")]);
+        const [whRes, mastersRes] = await Promise.all([
+          api.get("/lookups/warehouses"),
+          api.get("/masters"),
+        ]);
         setWarehouses(whRes.data || []);
         setMasters(mastersRes.data || []);
 
@@ -138,11 +194,17 @@ export default function ComponentDetailPage() {
 
   /* ------ component kaydını yükle ------ */
   useEffect(() => {
-    if (!id) { navigate("/404"); return; }
+    if (!id) {
+      navigate("/404");
+      return;
+    }
+
     (async () => {
       try {
         setLoading(true);
+
         const { data } = await api.get(`/components/${id}`);
+
         setBarcode(data.barcode || "");
         setMasterId(data.master?.id || "");
         setStatusId(data.status_id || "");
@@ -152,38 +214,52 @@ export default function ComponentDetailPage() {
         setInvoiceNo(data.invoice_no || "");
         setNotes(data.notes || "");
 
-        // width / height sayıya çevrilmiş hali
-        const wNum = data.width !== null && data.width !== undefined
-          ? Number(data.width)
-          : null;
-        const hNum = data.height !== null && data.height !== undefined
-          ? Number(data.height)
-          : null;
+        // ✅ master bimeks code
+        setMasterCode(data.master?.bimeks_code || "");
+
+        // ✅ stock_unit -> aktif/pasif alanlar
+        const su = String(data.master?.stock_unit || "").toLowerCase();
+        setMasterStockUnit(su);
+        setMasterUnitLabel(unitLabelTR(su));
+
+        // ✅ width/height/area
+        const wNum =
+          data.width !== null && data.width !== undefined
+            ? Number(data.width)
+            : null;
+        const hNum =
+          data.height !== null && data.height !== undefined
+            ? Number(data.height)
+            : null;
 
         setWidth(wNum !== null && !Number.isNaN(wNum) ? wNum : "");
         setHeight(hNum !== null && !Number.isNaN(hNum) ? hNum : "");
 
-        // area (DB'de varsa onu, yoksa w*h)
         const areaNum =
           data.area !== null && data.area !== undefined
             ? Number(data.area)
             : wNum !== null && hNum !== null
-              ? wNum * hNum
-              : null;
+            ? wNum * hNum
+            : null;
 
-        setArea(
-          areaNum !== null && !Number.isNaN(areaNum) ? areaNum : ""
+        setArea(areaNum !== null && !Number.isNaN(areaNum) ? areaNum : "");
+
+        // ✅ weight/length
+        const weightNum =
+          data.weight !== null && data.weight !== undefined
+            ? Number(data.weight)
+            : null;
+        setWeight(
+          weightNum !== null && !Number.isNaN(weightNum) ? weightNum : ""
         );
 
-        setMasterCode(data.master?.bimeks_code || "");
-
-        const lu = data.master?.length_unit || null;
-        setMasterUnitLabel(
-          lu === "m" ? "Metre" :
-            lu === "um" ? "Mikron" :
-              lu || ""
+        const lengthNum =
+          data.length !== null && data.length !== undefined
+            ? Number(data.length)
+            : null;
+        setLength(
+          lengthNum !== null && !Number.isNaN(lengthNum) ? lengthNum : ""
         );
-
       } catch (err) {
         console.error("component details load error:", err);
         alert("Detay yüklenemedi.");
@@ -197,55 +273,96 @@ export default function ComponentDetailPage() {
   /* ------ Kaydet (component) ------ */
   const handleSave = async () => {
     try {
-    // 🔴 En / boy zorunlu
-    if (width === "" || height === "") {
-      alert("En ve boy alanları zorunludur.");
-      return;
-    }
-
-    const w = Number(width);
-    const h = Number(height);
-
-    if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
-      alert("En ve boy 0'dan büyük sayılar olmalıdır.");
-      return;
-    }
-
-    if (Number(statusId) === 1) {
-      if (!warehouseId || !locationId) {
-        alert("Durum 'Depoda' iken Depo ve Lokasyon seçimi zorunludur.");
-        return;
+      // Depoda ise depo+lokasyon zorunlu
+      if (Number(statusId) === 1) {
+        if (!warehouseId || !locationId) {
+          alert("Durum 'Depoda' iken Depo ve Lokasyon seçimi zorunludur.");
+          return;
+        }
       }
-    }
 
-    const payload: any = {
-      barcode,
-      master_id: masterId ? Number(masterId) : undefined,
-      status_id: statusId ? Number(statusId) : undefined,
-      warehouse_id: warehouseId
-        ? Number(warehouseId)
-        : Number(statusId) === 1
-        ? Number(warehouseId)
-        : null,
-      location_id: locationId
-        ? Number(locationId)
-        : Number(statusId) === 1
-        ? Number(locationId)
-        : null,
-      invoice_no: invoiceNo.trim() ? invoiceNo.trim() : null,
-      notes: notes || null,
-      width: w,
-      height: h,
-      area: w * h, // 🔴 alanı da gönder
-    };
+      // ölçü birimine göre validasyon + payload values
+      let outWidth: number | null = null;
+      let outHeight: number | null = null;
+      let outArea: number | null = null;
+      let outWeight: number | null = null;
+      let outLength: number | null = null;
 
+      if (isArea) {
+        // en/boy opsiyonel; girildiyse ikisi birlikte ve >0 olmalı
+        if (width === "" && height === "") {
+          outWidth = null;
+          outHeight = null;
+          outArea = null;
+        } else {
+          if (width === "" || height === "") {
+            alert("Alan için En ve Boy birlikte girilmelidir.");
+            return;
+          }
+          const w = Number(width);
+          const h = Number(height);
+          if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+            alert("En ve Boy 0'dan büyük sayılar olmalıdır.");
+            return;
+          }
+          outWidth = w;
+          outHeight = h;
+          outArea = w * h;
+        }
+      }
 
+      if (isWeight) {
+        if (weight === "") {
+          alert("Ağırlık girilmelidir.");
+          return;
+        }
+        const ww = Number(weight);
+        if (!Number.isFinite(ww) || ww <= 0) {
+          alert("Ağırlık 0'dan büyük sayı olmalıdır.");
+          return;
+        }
+        outWeight = ww;
+      }
+
+      if (isLength) {
+        if (length === "") {
+          alert("Uzunluk girilmelidir.");
+          return;
+        }
+        const ll = Number(length);
+        if (!Number.isFinite(ll) || ll <= 0) {
+          alert("Uzunluk 0'dan büyük sayı olmalıdır.");
+          return;
+        }
+        outLength = ll;
+      }
+
+      if (isUnit) {
+        // hepsi null kalacak
+      }
+
+      const payload: any = {
+        barcode,
+        // master değiştirme yok -> master_id gönderme
+        status_id: statusId ? Number(statusId) : undefined,
+        warehouse_id: warehouseId ? Number(warehouseId) : null,
+        location_id: locationId ? Number(locationId) : null,
+        invoice_no: invoiceNo.trim() ? invoiceNo.trim() : null,
+        notes: notes || null,
+
+        // 5 alan
+        width: outWidth,
+        height: outHeight,
+        area: outArea,
+        weight: outWeight,
+        length: outLength,
+      };
 
       await api.put(`/components/${id}`, payload);
       alert("Komponent güncellendi.");
     } catch (err: any) {
       console.error("save error:", err?.response?.data || err);
-      alert("Kaydetme hatası.");
+      alert(err?.response?.data?.message || "Kaydetme hatası.");
     }
   };
 
@@ -261,7 +378,12 @@ export default function ComponentDetailPage() {
     try {
       setTlLoading(true);
       setTlError(null);
-      const params = { item_type: "component", item_id: id, limit: TL_PAGE, offset: reset ? 0 : tlOffset };
+      const params = {
+        item_type: "component",
+        item_id: id,
+        limit: TL_PAGE,
+        offset: reset ? 0 : tlOffset,
+      };
       const { data } = await api.get(`/inventory-transitions`, { params });
       const rows: TLRow[] = data?.rows || data || [];
       const total: number = data?.total ?? rows.length;
@@ -275,26 +397,25 @@ export default function ComponentDetailPage() {
       setTlLoading(false);
     }
   };
+
   useEffect(() => {
     setTlItems([]);
     setTlOffset(0);
     setTlTotal(0);
-    fetchTransitions(true).catch(() => { });
+    fetchTransitions(true).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  // tarih biçimleyici
   const fmt = (d?: string) => (d ? new Date(d).toLocaleString() : "");
   const tlHasMore = tlItems.length < tlTotal;
 
   const currentMaster = masters.find((m) => m.id === masterId);
-  const masterDisplay =
-    currentMaster
-      ? currentMaster.display_label ||
+  const masterDisplay = currentMaster
+    ? currentMaster.display_label ||
       currentMaster.bimeks_product_name ||
       currentMaster.name ||
       ""
-      : "";
+    : "";
 
   return (
     <div className="space-y-6">
@@ -316,62 +437,102 @@ export default function ComponentDetailPage() {
 
               <div>
                 <Label>Bimeks Kodu (Master)</Label>
-                <Input
-                  value={masterCode}
-                  disabled
-                  placeholder="Seçilen master'ın Bimeks kodu"
-                />
+                <Input value={masterCode} disabled placeholder="—" />
               </div>
 
               <div>
                 <Label>Barkod</Label>
-                <Input value={barcode} onChange={(e) => setBarcode(e.target.value)} />
+                <Input
+                  value={barcode}
+                  onChange={(e) => setBarcode(e.target.value)}
+                />
               </div>
 
               <div>
                 <Label>Durum</Label>
                 <Select
-                  options={[{ value: "", label: "Seçiniz", disabled: true }, ...statuses.map((s) => ({ value: String(s.value), label: s.label }))]}
+                  options={[
+                    { value: "", label: "Seçiniz", disabled: true },
+                    ...statuses.map((s) => ({
+                      value: String(s.value),
+                      label: s.label,
+                    })),
+                  ]}
                   value={statusId ? String(statusId) : ""}
                   onChange={(v: string) => setStatusId(v ? Number(v) : "")}
                 />
               </div>
 
               <div>
-                <Label>En <span className="text-red-500">*</span></Label>
+                <Label>Ölçü Birimi (Master)</Label>
+                <Input value={masterUnitLabel} disabled />
+              </div>
+
+              <div>
+                <Label>Alan</Label>
+                <Input
+                  type="number"
+                  value={area === "" ? "" : String(area)}
+                  disabled
+                  placeholder={isArea ? "Otomatik (En*Boy)" : "—"}
+                />
+              </div>
+
+              <div>
+                <Label>En</Label>
                 <Input
                   type="number"
                   value={width === "" ? "" : String(width)}
                   onChange={(e) =>
                     setWidth(e.target.value === "" ? "" : Number(e.target.value))
                   }
-                  placeholder="Zorunlu"
+                  placeholder={widthEnabled ? "Opsiyonel" : "—"}
+                  disabled={!widthEnabled}
                 />
               </div>
 
               <div>
-                <Label>Boy <span className="text-red-500">*</span></Label>
+                <Label>Boy</Label>
                 <Input
                   type="number"
                   value={height === "" ? "" : String(height)}
                   onChange={(e) =>
-                    setHeight(e.target.value === "" ? "" : Number(e.target.value))
+                    setHeight(
+                      e.target.value === "" ? "" : Number(e.target.value)
+                    )
                   }
-                  placeholder="Zorunlu"
+                  placeholder={heightEnabled ? "Opsiyonel" : "—"}
+                  disabled={!heightEnabled}
                 />
               </div>
 
               <div>
-                <Label>Ölçü Birimi</Label>
-                <Input value={masterUnitLabel} disabled />
+                <Label>Ağırlık</Label>
+                <Input
+                  type="number"
+                  value={weight === "" ? "" : String(weight)}
+                  onChange={(e) =>
+                    setWeight(
+                      e.target.value === "" ? "" : Number(e.target.value)
+                    )
+                  }
+                  placeholder={weightEnabled ? "Zorunlu" : "—"}
+                  disabled={!weightEnabled}
+                />
               </div>
 
               <div>
-                <Label>Alan (m²)</Label>
+                <Label>Uzunluk</Label>
                 <Input
                   type="number"
-                  value={area === "" ? "" : String(area)}
-                  disabled
+                  value={length === "" ? "" : String(length)}
+                  onChange={(e) =>
+                    setLength(
+                      e.target.value === "" ? "" : Number(e.target.value)
+                    )
+                  }
+                  placeholder={lengthEnabled ? "Zorunlu" : "—"}
+                  disabled={!lengthEnabled}
                 />
               </div>
 
@@ -384,7 +545,7 @@ export default function ComponentDetailPage() {
                     const next = v ? Number(v) : "";
                     setWarehouseId(next as any);
                     if (v) await ensureLocations(Number(v));
-                    setLocationId(""); // depo değişince lokasyonu sıfırla
+                    setLocationId("");
                   }}
                   placeholder="Seçiniz"
                 />
@@ -411,7 +572,11 @@ export default function ComponentDetailPage() {
 
               <div className="md:col-span-2">
                 <Label>Notlar</Label>
-                <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Opsiyonel" />
+                <Input
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Opsiyonel"
+                />
               </div>
             </div>
 
@@ -431,7 +596,9 @@ export default function ComponentDetailPage() {
             )}
 
             {!tlItems.length && !tlLoading ? (
-              <div className="py-4 text-sm text-gray-500 dark:text-gray-400">Kayıt bulunamadı.</div>
+              <div className="py-4 text-sm text-gray-500 dark:text-gray-400">
+                Kayıt bulunamadı.
+              </div>
             ) : (
               <ul className="space-y-3">
                 {tlItems.map((t) => {
@@ -441,7 +608,6 @@ export default function ComponentDetailPage() {
                       key={t.id}
                       className="rounded-xl border border-gray-200 p-3 text-sm shadow-theme-xs dark:border-gray-800"
                     >
-                      {/* başlık + tarih */}
                       <div className="flex items-start justify-between gap-3">
                         <div className="font-medium text-gray-800 dark:text-gray-100">
                           {f.title}
@@ -451,14 +617,12 @@ export default function ComponentDetailPage() {
                         </div>
                       </div>
 
-                      {/* yer satırı */}
                       {f.placeLine && (
                         <div className="mt-1 text-gray-700 dark:text-gray-300">
                           {f.placeLine}
                         </div>
                       )}
 
-                      {/* rozetler: miktar / yeni barkod vs. */}
                       {f.extras.length > 0 && (
                         <div className="mt-2 flex flex-wrap gap-2">
                           {f.extras.map((x, i) => (
@@ -472,11 +636,13 @@ export default function ComponentDetailPage() {
                         </div>
                       )}
 
-                      {/* not ve meta (varsa) */}
-                      {(!!t.notes || (!!t.meta && Object.keys(t.meta || {}).length > 0)) && (
+                      {(!!t.notes ||
+                        (!!t.meta &&
+                          Object.keys(t.meta || {}).length > 0)) && (
                         <div className="mt-2 rounded-lg bg-gray-50 p-2 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-300">
                           {t.notes ? <div>Not: {t.notes}</div> : null}
-                          {!!t.meta && Object.keys(t.meta || {}).length > 0 ? (
+                          {!!t.meta &&
+                          Object.keys(t.meta || {}).length > 0 ? (
                             <pre className="mt-1 overflow-auto whitespace-pre-wrap break-words">
                               {JSON.stringify(t.meta, null, 2)}
                             </pre>
@@ -492,7 +658,9 @@ export default function ComponentDetailPage() {
             <div className="mt-4 flex items-center justify-between">
               <div className="text-xs text-gray-500">Toplam {tlTotal} kayıt</div>
               <div className="flex items-center gap-2">
-                {tlLoading && <span className="text-sm text-gray-500">Yükleniyor…</span>}
+                {tlLoading && (
+                  <span className="text-sm text-gray-500">Yükleniyor…</span>
+                )}
                 {tlHasMore && !tlLoading && (
                   <Button variant="outline" onClick={() => fetchTransitions(false)}>
                     Daha Fazla Yükle

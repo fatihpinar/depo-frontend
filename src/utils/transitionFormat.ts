@@ -58,10 +58,15 @@ function qtyText(delta?: number | null, unit?: string | null): string | null {
 function titleFor(t: TransitionRow): string {
   const meta = t.meta || {};
 
-  // 🔹 Özel kural: Component çıkışı ekranında hedef "Satış" ise
-  // BE meta.target = "sale" gönderiyor → başlık "Satış" olsun.
+  // 🔹 Component çıkışı ekranında hedef "Satış" ise
   if (t.action === "CONSUME" && meta.target === "sale") {
     return "Satış";
+  }
+
+  // 🔹 İlk yaratma: her zaman "Yeni kayıt" desin
+  if (t.action === "CREATE") {
+    return ACTION_LABEL_TR.CREATE; // "Yeni kayıt"
+    // istersen direkt: return "İlk giriş";
   }
 
   // 🔹 MOVE her zaman "Yer değişti" kalsın
@@ -75,9 +80,10 @@ function titleFor(t: TransitionRow): string {
     return STATUS_LABEL_FALLBACK_TR[t.to_status_id];
   }
 
-  // 🔹 Aksi halde aksiyon sözlüğüne düş
+  // 🔹 Aksi halde aksiyon sözlüğü
   return ACTION_LABEL_TR[t.action] || String(t.action);
 }
+
 
 
 function humanDetailsTR(t: TransitionRow): string[] {

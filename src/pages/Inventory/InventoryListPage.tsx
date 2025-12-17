@@ -177,6 +177,45 @@ export default function InventoryListPage() {
       <span className="text-gray-400 dark:text-gray-500">—</span>
     );
 
+      const normalizeUnit = (u?: string | null): "area" | "weight" | "length" | "unit" | "" => {
+    const x = String(u || "").trim().toLowerCase();
+    if (x === "area") return "area";
+    if (x === "weight") return "weight";
+    if (x === "length") return "length";
+    if (x === "unit") return "unit";
+    // bazen BE "EA" falan dönerse yakala:
+    if (x === "ea") return "unit";
+    return "";
+  };
+
+  const unitLabelTR = (u?: string | null) => {
+    const k = normalizeUnit(u);
+    if (k === "area") return "Alan";
+    if (k === "weight") return "Ağırlık";
+    if (k === "length") return "Uzunluk";
+    if (k === "unit") return "Adet";
+    return "—";
+  };
+
+  const unitSuffix = (u?: string | null) => {
+    const k = normalizeUnit(u);
+    if (k === "area") return "(m2)";
+    if (k === "weight") return "(kg)";
+    if (k === "length") return "(m)";
+    if (k === "unit") return "(EA)";
+    return "";
+  };
+
+  const fmtQtyWithUnit = (r: Row) => {
+    if (typeof r.quantity !== "number") return null;
+    const suf = unitSuffix(r.unit);
+    return (
+      <span className="whitespace-nowrap">
+        {r.quantity} {suf}
+      </span>
+    );
+  };
+
   /* ------------ UI ------------ */
   return (
     <div className="space-y-6">
@@ -318,24 +357,20 @@ export default function InventoryListPage() {
                         </span>
                       )}
                     </td>
-
                     <td className="px-4 py-3">
-                      {r.unit ?? (
-                        <span className="text-gray-400 dark:text-gray-500">
-                          —
-                        </span>
+                      {unitLabelTR(r.unit) !== "—" ? (
+                        unitLabelTR(r.unit)
+                      ) : (
+                        <span className="text-gray-400 dark:text-gray-500">—</span>
                       )}
                     </td>
                     <td className="px-4 py-3">
                       {typeof r.quantity === "number" ? (
-                        r.quantity
+                        fmtQtyWithUnit(r)
                       ) : (
-                        <span className="text-gray-400 dark:text-gray-500">
-                          —
-                        </span>
+                        <span className="text-gray-400 dark:text-gray-500">—</span>
                       )}
                     </td>
-
                     <td className="px-4 py-3">
                       {r.warehouse_name ?? (
                         <span className="text-gray-400 dark:text-gray-500">

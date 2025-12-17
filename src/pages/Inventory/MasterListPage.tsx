@@ -10,23 +10,50 @@ import { Link } from "react-router-dom";
 import * as XLSX from "xlsx";
 
 /* ================== EXCEL EXPORT ================== */
+const UNIT_LABEL_MAP: Record<string, string> = {
+  length: "length (m)",
+  unit: "unit (EA)",
+  weight: "weight (kg)",
+  area: "area (m²)",
+};
+
+function toNumberSafe(v: any) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function formatUnitForExcel(unit?: string | null) {
+  if (!unit) return "";
+  return UNIT_LABEL_MAP[unit] ?? unit;
+}
 
 function exportToExcel(rows: Row[]) {
   const data = rows.map((r) => ({
     "Bimeks Kodu": r.bimeks_code ?? "",
     "Bimeks Ürün Tanımı": r.bimeks_product_name ?? "",
+
+    // ✅ Tek kolonda: length (m) / area (m²) / weight (kg) / unit (EA)
+    "Ölçü Birimi": formatUnitForExcel(r.stock_unit),
+
+    // ✅ SADE SAYI (Excel için birim yok)
+    "Toplam Miktar": toNumberSafe(r.total_qty),
+
+    "Toplam Adet": toNumberSafe(r.total_count),
+
     "Ürün Türü": r.product_type_name ?? "",
     "Taşıyıcı Türü": r.carrier_type_name ?? "",
-    Tedarikçi: r.supplier_name ?? "",
+    "Tedarikçi": r.supplier_name ?? "",
+    "Tedarikçi Ürün Kodu": r.supplier_product_code ?? "",
     "Taşıyıcı Renk": r.carrier_color_name ?? "",
     "Liner Renk": r.liner_color_name ?? "",
     "Liner Türü": r.liner_type_name ?? "",
     "Yapışkan Türü": r.adhesive_type_name ?? "",
-    Kalınlık: r.thickness ?? "",
+    "Kalınlık": r.thickness ?? "",
     "Taşıyıcı Yoğunluk": r.carrier_density ?? "",
-    "Tedarikçi Ürün Kodu": r.supplier_product_code ?? "",
-    Oluşturma: r.created_at ? new Date(r.created_at).toLocaleString() : "",
-    Güncelleme: r.updated_at ? new Date(r.updated_at).toLocaleString() : "",
+
+    // ✅ Tarihler (UI gibi)
+    "Oluşturma": r.created_at ? new Date(r.created_at).toLocaleString() : "",
+    "Güncelleme": r.updated_at ? new Date(r.updated_at).toLocaleString() : "",
   }));
 
   const wb = XLSX.utils.book_new();
@@ -44,9 +71,13 @@ type Lookup = {
 };
 
 type Row = {
-  id: number;
 
-  // masters tablosu kolonları
+  id: number;
+  bimeks_code: string | null;
+  bimeks_product_name: string | null;
+  stock_unit?: "area" | "weight" | "length" | "unit" | null;
+  total_count?: number | string | null; // ✅ toplam adet
+  total_qty?: number | string | null;   // ✅ toplam miktar
   product_type_id: number;
   carrier_type_id: number | null;
   supplier_id: number;
@@ -57,12 +88,10 @@ type Row = {
   liner_color_id: number | null;
   liner_type_id: number | null;
   adhesive_type_id: number | null;
-  bimeks_code: string | null;
-  bimeks_product_name: string | null;
+
   created_at?: string;
   updated_at?: string;
 
-  // JOIN edilmiş ad alanları (repo.findMany içinde üretilecek)
   product_type_name?: string | null;
   carrier_type_name?: string | null;
   supplier_name?: string | null;
@@ -70,6 +99,9 @@ type Row = {
   liner_color_name?: string | null;
   liner_type_name?: string | null;
   adhesive_type_name?: string | null;
+
+  total_unit_count?: number | string | null;
+  total_area_sum?: number | string | null;
 };
 
 export default function MasterListPage() {
@@ -83,6 +115,27 @@ export default function MasterListPage() {
 
   const [productTypes, setProductTypes] = useState<Lookup[]>([]);
   const [suppliers, setSuppliers] = useState<Lookup[]>([]);
+  const unitLabel = (u?: string | null) => {
+    if (u === "area") return "Alan (m²)";
+    if (u === "weight") return "Ağırlık (kg)";
+    if (u === "length") return "Uzunluk (m)";
+    if (u === "unit") return "Adet";
+    return "—";
+  };
+
+  const unitSuffix = (u?: string | null) => {
+    if (u === "area") return "m²";
+    if (u === "weight") return "kg";
+    if (u === "length") return "m";
+    if (u === "unit") return "EA";
+    return "";
+  };
+
+  const formatQty = (val: any) => {
+    const n = Number(val);
+    if (!Number.isFinite(n)) return "0";
+    return n.toLocaleString("tr-TR", { maximumFractionDigits: 3 });
+  };
 
   /* ========== DATA FETCH ========== */
 
@@ -144,6 +197,14 @@ export default function MasterListPage() {
     ],
     [suppliers]
   );
+
+  const formatInt = (val: any) => {
+    const n = Number(val);
+    if (!Number.isFinite(n)) return "0";
+    return n.toLocaleString("tr-TR", {
+      maximumFractionDigits: 0, // 🔹 tam sayı
+    });
+  };
 
   /* ========== UI ========== */
 
@@ -215,6 +276,15 @@ export default function MasterListPage() {
                 </th>
                 <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
                   Bimeks Ürün Tanımı
+                </th>
+                <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
+                  Ölçü Birimi
+                </th>
+                <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
+                  Toplam Adet
+                </th>
+                <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
+                  Toplam Miktar
                 </th>
                 <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
                   Ürün Türü
@@ -289,6 +359,18 @@ export default function MasterListPage() {
                         </span>
                       )}
                     </td>
+                    <td className="px-4 py-3">
+                      {unitLabel(r.stock_unit)}
+                    </td>
+
+                    <td className="px-4 py-3 text-right">
+                      {formatInt(r.total_count)}
+                    </td>
+
+                    <td className="px-4 py-3 text-right">
+                      {formatQty(r.total_qty)} {unitSuffix(r.stock_unit)}
+                    </td>
+
                     <td className="px-4 py-3">
                       {r.product_type_name ?? (
                         <span className="text-gray-400 dark:text-gray-500">

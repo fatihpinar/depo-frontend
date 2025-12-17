@@ -7,7 +7,6 @@ import Label from "../../components/form/Label";
 import Input from "../../components/form/input/InputField";
 import Select from "../../components/form/Select";
 import Button from "../../components/ui/button/Button";
-import Checkbox from "../../components/form/input/Checkbox";
 import api from "../../services/api";
 
 /* -------------------- Config -------------------- */
@@ -17,6 +16,8 @@ const RECIPES_BASE = "/products/recipes";
 type Target = "production" | "screenprint" | "stock";
 type ExitMode = "component" | "product";
 type RowTarget = "sale" | "stock";
+type QtyMode = "unit" | "quantity";
+type StockUnit = "area" | "weight" | "length" | "unit" | string;
 
 type RecipeRow = {
   recipe_id: string;
@@ -28,7 +29,13 @@ type StockRow = {
   id: number;
   barcode: string;
   name: string | null;
-  area: number; // satırın alanı
+  bimeks_code?: string | null;
+  stock_unit?: StockUnit | null;
+  width?: number | null;
+  height?: number | null;
+  weight?: number | null;
+  length?: number | null;
+  area: number;
   areaUnit: string;
   warehouse: { id: number; name: string };
   location: { id: number; name: string };
@@ -38,12 +45,11 @@ type StockRow = {
 type PickedComponent = {
   key: string;
   stock?: StockRow;
-  consumeQty?: number; // Kullanılacak alan
+  qtyMode?: QtyMode;
+  consumeQty?: number;
   open?: boolean;
-
   expectedMasterId?: number;
   expectedLabel?: string;
-
   rowTarget?: RowTarget;
   rowWarehouseId?: string;
   rowLocationId?: string;
@@ -52,15 +58,78 @@ type PickedComponent = {
 type Warehouse = { id: number; name: string };
 type Location = { id: number; name: string; warehouse_id: number };
 
+/* -------------------- Helper Functions -------------------- */
 const safeRandomId = () =>
   (globalThis as any)?.crypto?.randomUUID?.() ??
   "id_" + Math.random().toString(36).slice(2, 10);
 
-const ROW_GRID_COMPONENT =
-  "grid gap-3 md:grid-cols-[minmax(28px,0.1fr)_minmax(260px,1.6fr)_minmax(120px,0.6fr)_minmax(150px,0.6fr)_minmax(150px,0.8fr)_minmax(150px,0.8fr)_minmax(80px,0.4fr)]";
+const norm = (v: any) => String(v ?? "").toLowerCase().trim();
 
-const ROW_GRID_PRODUCT =
-  "grid gap-3 md:grid-cols-[minmax(28px,0.1fr)_minmax(260px,1.8fr)_minmax(120px,0.7fr)_minmax(80px,0.4fr)]";
+const toneClass = (n: number, zeroIsRed = false) => {
+  if (!Number.isFinite(n)) return "";
+  if (zeroIsRed && n === 0) return "text-rose-600";
+  if (n > 5) return "text-emerald-600";
+  if (n >= 1) return "text-amber-600";
+  return "";
+};
+
+const unitLabelTR = (u?: string | null) => {
+  const x = norm(u);
+  if (x === "area") return "Alan";
+  if (x === "weight") return "Ağırlık";
+  if (x === "length") return "Uzunluk";
+  if (x === "unit") return "Adet";
+  return "—";
+};
+
+const getMeasure = (r?: StockRow) => {
+  if (!r) return { value: 0, label: "", max: 0 };
+
+  const u = norm(r.stock_unit);
+  if (u === "area") {
+    const v = Number(r.area ?? 0);
+    return { value: v, max: v, label: `${v} ${r.areaUnit || ""}`.trim() };
+  }
+  if (u === "weight") {
+    const v = Number(r.weight ?? 0);
+    return { value: v, max: v, label: `${v}` };
+  }
+  if (u === "length") {
+    const v = Number(r.length ?? 0);
+    return { value: v, max: v, label: `${v}` };
+  }
+  const v = 1;
+  return { value: v, max: v, label: `1` };
+};
+
+const getStockUnitDisplay = (stockUnit?: string | null) => {
+  const u = String(stockUnit || "").toLowerCase();
+  if (u === "area") return "Alan";
+  if (u === "weight") return "Ağırlık";
+  if (u === "length") return "Uzunluk";
+  if (u === "unit") return "Adet";
+  return "—";
+};
+
+const getStockValueDisplay = (r: StockRow) => {
+  const u = String(r.stock_unit || "").toLowerCase();
+
+  if (u === "area") {
+    return (
+      <span className="whitespace-nowrap">
+        En: {r.width ?? "—"} • Boy: {r.height ?? "—"} • Alan: {r.area ?? "—"} {r.areaUnit || ""}
+      </span>
+    );
+  }
+  if (u === "weight") return <span>{r.weight ?? "—"}</span>;
+  if (u === "length") return <span>{r.length ?? "—"}</span>;
+  if (u === "unit") return <span>Adet</span>;
+
+  return "—";
+};
+
+const disabledWrap = (disabled: boolean) =>
+  disabled ? "opacity-50 pointer-events-none" : "";
 
 /* ==================================================== */
 
@@ -73,7 +142,7 @@ export default function StockExitPage() {
 
   /* ---------- Tarif listesi & seçim ---------- */
   const [recipes, setRecipes] = useState<RecipeRow[]>([]);
-  const [recipeSelect, setRecipeSelect] = useState<string>("none"); // "none" | "new" | recipe_id
+  const [recipeSelect, setRecipeSelect] = useState<string>("none");
   const [newRecipeName, setNewRecipeName] = useState<string>("");
 
   const loadRecipes = async () => {
@@ -95,27 +164,33 @@ export default function StockExitPage() {
     loadRecipes();
   }, []);
 
+  /* ---------- Helper: Yeni satır oluşturma ---------- */
+  const makeEmptyRow = (prefill?: {
+    expectedMasterId?: number;
+    expectedLabel?: string;
+    qty?: number;
+  }): { key: string; row: PickedComponent } => {
+    const key = safeRandomId();
+    const row: PickedComponent = {
+      key,
+      open: false,
+      expectedMasterId: prefill?.expectedMasterId,
+      expectedLabel: prefill?.expectedLabel,
+      qtyMode: exitMode === "product" ? "quantity" : "unit",
+      consumeQty: prefill?.qty,
+      rowTarget: "sale",
+      rowWarehouseId: "",
+      rowLocationId: "",
+    };
+    return { key, row };
+  };
+
+  const initial = useMemo(() => makeEmptyRow(), []);
+
   /* ---------- Components ---------- */
-  const [components, setComponents] = useState<PickedComponent[]>([]);
-  const [search, setSearch] = useState<Record<string, string>>({});
+  const [components, setComponents] = useState<PickedComponent[]>([initial.row]);
+  const [search, setSearch] = useState<Record<string, string>>({ [initial.key]: "" });
   const [choices, setChoices] = useState<Record<string, StockRow[]>>({});
-
-  // Satır seçimleri
-  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
-
-  const allSelected =
-    components.length > 0 && selectedRowKeys.length === components.length;
-
-  const toggleAllRows = () => {
-    if (allSelected) setSelectedRowKeys([]);
-    else setSelectedRowKeys(components.map((c) => c.key));
-  };
-
-  const toggleRowSelection = (key: string) => {
-    setSelectedRowKeys((prev) =>
-      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
-    );
-  };
 
   /* ---------- Finalize (sadece ürün oluşturma için) ---------- */
   const [showFinalize, setShowFinalize] = useState(false);
@@ -185,32 +260,22 @@ export default function StockExitPage() {
     ];
   }, [exitMode, recipes]);
 
-  /* ---------- Yardımcılar ---------- */
-  const toneClass = (n: number, zeroIsRed = false) => {
-    if (!Number.isFinite(n)) return "";
-    if (zeroIsRed && n === 0) return "text-rose-600";
-    if (n > 5) return "text-emerald-600";
-    if (n >= 1) return "text-amber-600";
-    return "";
-  };
-
   /* ---------- FE: master bazında toplam stok (cache) ---------- */
-  const [masterTotals, setMasterTotals] = useState<Record<number, number>>({});
+  const [masterCounts, setMasterCounts] = useState<Record<number, number>>({});
 
-  const ensureMasterTotal = async (masterId?: number) => {
+  const ensureMasterCount = async (masterId?: number) => {
     if (!masterId) return;
-    if (masterTotals[masterId] !== undefined) return; // cache
+    if (masterCounts[masterId] !== undefined) return;
+
     try {
       const { data } = await api.get("/components", {
-        params: { availableOnly: true, masterId },
+        params: { availableOnly: true, masterId, statusId: 1 },
       });
-      const total = (data || []).reduce(
-        (sum: number, r: any) => sum + Number(r.area ?? 0),
-        0
-      );
-      setMasterTotals((m) => ({ ...m, [masterId]: total }));
+
+      const count = Array.isArray(data) ? data.length : 0;
+      setMasterCounts((m) => ({ ...m, [masterId]: count }));
     } catch {
-      setMasterTotals((m) => ({ ...m, [masterId]: 0 }));
+      setMasterCounts((m) => ({ ...m, [masterId]: 0 }));
     }
   };
 
@@ -219,14 +284,19 @@ export default function StockExitPage() {
     components.length > 0 &&
     components.every((c) => {
       if (!c.stock) return false;
+
+      const mode: QtyMode = c.qtyMode || "unit";
+
+      if (mode === "unit") return true;
+
+      const m = getMeasure(c.stock);
       const q = Number(c.consumeQty || 0);
-      return q > 0 && q <= (c.stock.area ?? 0);
+      return q > 0 && q <= (m.max ?? 0);
     });
 
   const recipeReady = useMemo(() => {
     if (exitMode !== "product") return true;
     if (recipeSelect === "new") return !!newRecipeName.trim();
-    // "none" veya herhangi bir tarif ID'si kabul
     return true;
   }, [exitMode, recipeSelect, newRecipeName]);
 
@@ -249,7 +319,7 @@ export default function StockExitPage() {
       return !!c.rowWarehouseId && !!c.rowLocationId;
     });
 
-  /* ---------- finalize’ı sıfırlayan yardımcı ---------- */
+  /* ---------- finalize'ı sıfırlayan yardımcı ---------- */
   const invalidateFinalize = () => {
     if (showFinalize) setShowFinalize(false);
     setTarget("");
@@ -260,45 +330,50 @@ export default function StockExitPage() {
   };
 
   const resetRows = () => {
-    setComponents([]);
-    setSearch({});
+    const { key, row } = makeEmptyRow();
+    setComponents([row]);
+    setSearch({ [key]: "" });
     setChoices({});
-    setSelectedRowKeys([]);
   };
 
   /* ---------- API: picker ---------- */
-  const loadChoices = async (
-    rowKey: string,
-    q: string,
-    expectedMasterId?: number
-  ) => {
+  const loadChoices = async (rowKey: string, q: string, expectedMasterId?: number) => {
     try {
-      const params: any = { search: q || undefined, availableOnly: true };
+      const params: any = { search: q || undefined, availableOnly: true, statusId: 1 };
       if (expectedMasterId) params.masterId = expectedMasterId;
 
       const res = await api.get("/components", { params });
       const items: StockRow[] = (res.data || []).map((r: any) => {
-        const lengthUnit =
-          r.master?.length_unit || r.master_length_unit || "";
+        const lengthUnit = r.master?.length_unit || r.master_length_unit || "";
         const areaUnit =
           lengthUnit === "um"
             ? "um²"
             : lengthUnit === "m"
-            ? "m²"
-            : lengthUnit
-            ? `${lengthUnit}²`
-            : "";
+              ? "m²"
+              : lengthUnit
+                ? `${lengthUnit}²`
+                : "";
+
+        const stockUnit =
+          r.master?.stock_unit || r.master_stock_unit || r.stock_unit || "";
 
         return {
           id: r.id,
           barcode: r.barcode,
-          area: Number(r.area ?? 0),
-          areaUnit,
           name:
             r.master?.bimeks_product_name ||
             r.master_bimeks_product_name ||
             r.bimeks_product_name ||
             null,
+          bimeks_code:
+            r.master?.bimeks_code || r.master_bimeks_code || r.bimeks_code || null,
+          stock_unit: stockUnit,
+          width: r.width ?? null,
+          height: r.height ?? null,
+          weight: r.weight ?? null,
+          length: r.length ?? null,
+          area: Number(r.area ?? 0),
+          areaUnit,
           warehouse: r.warehouse || { id: 0, name: "-" },
           location: r.location || { id: 0, name: "-" },
           master_id: r.master?.id ?? r.master_id,
@@ -307,7 +382,7 @@ export default function StockExitPage() {
 
       setChoices((prev) => ({ ...prev, [rowKey]: items }));
 
-      if (expectedMasterId) ensureMasterTotal(expectedMasterId);
+      if (expectedMasterId) ensureMasterCount(expectedMasterId);
     } catch (e) {
       console.error("components fetch error:", e);
       setChoices((prev) => ({ ...prev, [rowKey]: [] }));
@@ -320,20 +395,8 @@ export default function StockExitPage() {
     expectedLabel?: string;
     qty?: number;
   }) => {
-    const key = safeRandomId();
-    setComponents((p) => [
-      ...p,
-      {
-        key,
-        open: false,
-        expectedMasterId: prefill?.expectedMasterId,
-        expectedLabel: prefill?.expectedLabel,
-        consumeQty: prefill?.qty,
-        rowTarget: "sale",
-        rowWarehouseId: "",
-        rowLocationId: "",
-      },
-    ]);
+    const { key, row } = makeEmptyRow(prefill);
+    setComponents((p) => [...p, row]);
     setSearch((s) => ({ ...s, [key]: prefill?.expectedLabel || "" }));
   };
 
@@ -352,19 +415,28 @@ export default function StockExitPage() {
 
   const chooseComponent = (idx: number, row: StockRow) => {
     setComponents((prev) =>
-      prev.map((c, i) =>
-        i === idx
-          ? {
-              ...c,
-              stock: row,
-              consumeQty:
-                typeof c.consumeQty === "number" ? c.consumeQty : row.area,
-              open: false,
-            }
-          : c
-      )
+      prev.map((item, i) => {
+        if (i !== idx) return item;
+
+        const mode: QtyMode =
+          item.qtyMode || (exitMode === "product" ? "quantity" : "unit");
+
+        const m = getMeasure(row);
+
+        return {
+          ...item,
+          stock: row,
+          qtyMode: mode,
+          consumeQty:
+            mode === "quantity"
+              ? (typeof item.consumeQty === "number" ? item.consumeQty : m.max)
+              : undefined,
+          open: false,
+        };
+      })
     );
-    ensureMasterTotal(row.master_id);
+
+    ensureMasterCount(row.master_id);
   };
 
   const removeRow = (key: string) => {
@@ -375,11 +447,10 @@ export default function StockExitPage() {
       return n;
     });
     setChoices((p) => {
-      const n = { ...p } as any;
+      const n = { ...p };
       delete n[key];
       return n;
     });
-    setSelectedRowKeys((prev) => prev.filter((k) => k !== key));
   };
 
   const setConsumeQty = (key: string, val: string) => {
@@ -389,26 +460,34 @@ export default function StockExitPage() {
         c.key !== key
           ? c
           : {
-              ...c,
-              consumeQty: Number.isFinite(num) && num > 0 ? num : undefined,
-            }
+            ...c,
+            consumeQty: Number.isFinite(num) && num > 0 ? num : undefined,
+          }
       )
     );
   };
 
   const setRowTarget = (key: string, val: RowTarget) => {
     setComponents((prev) =>
-      prev.map((c) =>
-        c.key === key
-          ? {
-              ...c,
-              rowTarget: val,
-              ...(val === "sale"
-                ? { rowWarehouseId: "", rowLocationId: "" }
-                : {}),
-            }
-          : c
-      )
+      prev.map((c) => {
+        if (c.key !== key) return c;
+
+        if (val === "stock") {
+          return {
+            ...c,
+            rowTarget: "stock",
+            qtyMode: "unit",
+            consumeQty: undefined,
+          };
+        }
+
+        return {
+          ...c,
+          rowTarget: "sale",
+          rowWarehouseId: "",
+          rowLocationId: "",
+        };
+      })
     );
   };
 
@@ -439,11 +518,16 @@ export default function StockExitPage() {
 
   const handleChangeRecipeSelect = async (val: string) => {
     setRecipeSelect(val);
-    resetRows();
+    setComponents([]);
+    setSearch({});
+    setChoices({});
     invalidateFinalize();
     setNewRecipeName("");
 
-    if (!val || val === "none" || val === "new") return;
+    if (!val || val === "none" || val === "new") {
+      resetRows();
+      return;
+    }
 
     try {
       const { data } = await api.get(`${RECIPES_BASE}/${val}/items`);
@@ -498,26 +582,23 @@ export default function StockExitPage() {
 
   /* ---------- Component çıkışı: global hedef/depo/lokasyon ---------- */
   const [globalRowTarget, setGlobalRowTarget] = useState<RowTarget | "">("");
+  const [globalWarehouseId, setGlobalWarehouseId] = useState<string>("");
+  const [globalLocationId, setGlobalLocationId] = useState<string>("");
+
   const handleChangeGlobalTarget = (v: string) => {
-  const val = (v || "") as RowTarget | "";
+    const val = (v || "") as RowTarget | "";
     setGlobalRowTarget(val);
 
-    // Satış seçildiyse global depo & lokasyon temizlensin
     if (val === "sale") {
       setGlobalWarehouseId("");
       setGlobalLocationId("");
     }
   };
-  const [globalWarehouseId, setGlobalWarehouseId] = useState<string>("");
-  const [globalLocationId, setGlobalLocationId] = useState<string>("");
 
-  const applyGlobalToRows = async (scope: "selected" | "all") => {
+  const applyGlobalToRows = async () => {
     if (!globalRowTarget) return;
 
-    const keys =
-      scope === "all"
-        ? components.map((c) => c.key)
-        : selectedRowKeys.slice();
+    const keys = components.map((c) => c.key);
     if (!keys.length) return;
 
     if (globalRowTarget === "stock") {
@@ -540,7 +621,6 @@ export default function StockExitPage() {
           };
         }
 
-        // globalRowTarget === "stock"
         return {
           ...c,
           rowTarget: "stock",
@@ -551,13 +631,6 @@ export default function StockExitPage() {
     );
   };
 
-  const canApplySelected =
-    !!globalRowTarget &&
-    selectedRowKeys.length > 0 &&
-    (globalRowTarget === "sale" ||
-      (globalRowTarget === "stock" &&
-        !!globalWarehouseId &&
-        !!globalLocationId));
 
   const canApplyAll =
     !!globalRowTarget &&
@@ -595,10 +668,11 @@ export default function StockExitPage() {
 
       const compPayload = components.map((c) => {
         if (!c.stock) throw new Error("Eksik component seçimi var.");
+        const mode: QtyMode = c.qtyMode || "quantity";
         return {
           component_id: c.stock.id,
-          // her zaman alan bazlı
-          consume_qty: Number(c.consumeQty || 0),
+          mode,
+          consume_qty: mode === "quantity" ? Number(c.consumeQty || 0) : undefined,
         };
       });
 
@@ -623,7 +697,6 @@ export default function StockExitPage() {
       const newId = data?.product?.id ?? data?.id ?? "?";
       alert(`Ürün oluşturuldu. ID: ${newId}`);
 
-      // reset
       setShowFinalize(false);
       setTarget("");
       setWarehouseId("");
@@ -640,7 +713,7 @@ export default function StockExitPage() {
     }
   };
 
-    /* ---------- Component çıkışı (çoklu statü değişimi) ---------- */
+  /* ---------- Component çıkışı (çoklu statü değişimi) ---------- */
   const handleSaveComponentExit = async () => {
     try {
       if (!componentExitValid) {
@@ -651,18 +724,15 @@ export default function StockExitPage() {
       const rowsPayload = components.map((c) => {
         if (!c.stock) throw new Error("Eksik component seçimi var.");
         const t: RowTarget = c.rowTarget || "sale";
+        const mode: QtyMode = c.qtyMode || "unit";
+
         return {
           component_id: c.stock.id,
-          consume_qty: Number(c.consumeQty || 0),
-          target: t, // "sale" | "stock"
-          warehouse_id:
-            t === "stock" && c.rowWarehouseId
-              ? Number(c.rowWarehouseId)
-              : undefined,
-          location_id:
-            t === "stock" && c.rowLocationId
-              ? Number(c.rowLocationId)
-              : undefined,
+          mode,
+          consume_qty: mode === "quantity" ? Number(c.consumeQty || 0) : undefined,
+          target: t,
+          warehouse_id: t === "stock" && c.rowWarehouseId ? Number(c.rowWarehouseId) : undefined,
+          location_id: t === "stock" && c.rowLocationId ? Number(c.rowLocationId) : undefined,
         };
       });
 
@@ -670,19 +740,17 @@ export default function StockExitPage() {
 
       alert("Component çıkışı kaydedildi.");
 
-      // FE tarafını temizle
       resetRows();
       setGlobalRowTarget("");
       setGlobalWarehouseId("");
       setGlobalLocationId("");
-      setMasterTotals({});
+      setMasterCounts({});
     } catch (err: any) {
       const msg = err?.response?.data?.message || err?.message || "Hata";
       alert(`Component çıkışı hatası: ${msg}`);
       console.error("component exit error", err?.response?.data || err);
     }
   };
-
 
   /* ---------- Yeni tarifi kaydet ---------- */
   const handleSaveRecipe = async () => {
@@ -744,7 +812,7 @@ export default function StockExitPage() {
 
   /* ==================================================== */
   return (
-    <div className="space-y-6 overflow-x-hidden">
+    <div className="space-y-6">
       <PageMeta
         title="Stok Çıkışı / Ürün Oluşturma"
         description="Stoktaki kalemlerden çıkış yap veya ürün oluştur"
@@ -777,7 +845,7 @@ export default function StockExitPage() {
                 <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                   Tarifsiz seçerseniz alanları manuel doldurabilirsiniz. Var
                   olan tarif seçildiğinde satırlar beklenen komponent
-                  master’ları ve miktarlarıyla gelir.
+                  master'ları ve miktarlarıyla gelir.
                 </p>
               </div>
 
@@ -807,10 +875,9 @@ export default function StockExitPage() {
 
       {/* COMPONENTLER */}
       <ComponentCard title="Componentler">
-        {/* Global hedef / depo / lokasyon sadece component çıkışında */}
         {exitMode === "component" && (
           <div className="mb-4 space-y-4">
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(160px,0.8fr)_minmax(220px,1fr)_minmax(220px,1fr)_auto_auto]">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(160px,0.8fr)_minmax(220px,1fr)_minmax(220px,1fr)_auto]">
               <div>
                 <Label>Global Hedef</Label>
                 <Select
@@ -836,7 +903,6 @@ export default function StockExitPage() {
                   ]}
                   value={globalWarehouseId}
                   onChange={async (v: string) => {
-                    // sadece hedef Depo iken anlamlı
                     setGlobalWarehouseId(v);
                     setGlobalLocationId("");
                     if (v && globalRowTarget === "stock") {
@@ -847,7 +913,7 @@ export default function StockExitPage() {
                     }
                   }}
                   placeholder="Seçiniz"
-                  disabled={globalRowTarget !== "stock"}   // 🔴 Satışta kilit
+                  disabled={globalRowTarget !== "stock"}
                 />
               </div>
 
@@ -867,39 +933,19 @@ export default function StockExitPage() {
                   value={globalLocationId}
                   onChange={(v: string) => setGlobalLocationId(v)}
                   placeholder="Seçiniz"
-                  disabled={globalRowTarget !== "stock"}   // 🔴 Satışta kilit
+                  disabled={globalRowTarget !== "stock"}
                 />
               </div>
               <div className="flex items-end justify-end md:justify-start gap-2">
                 <Button
                   variant="outline"
                   className="w-full md:w-auto"
-                  onClick={() => applyGlobalToRows("selected")}
-                  disabled={!canApplySelected}
-                >
-                  Seçilene Uygula
-                </Button>
-              </div>
-              <div className="flex items-end justify-end md:justify-start gap-2">
-                <Button
-                  variant="outline"
-                  className="w-full md:w-auto"
-                  onClick={() => applyGlobalToRows("all")}
+                  onClick={applyGlobalToRows}
                   disabled={!canApplyAll}
                 >
                   Tümüne Uygula
                 </Button>
               </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <Checkbox checked={allSelected} onChange={toggleAllRows} />
-              <span className="text-sm text-gray-700 dark:text-gray-300">
-                Tümünü Seç
-              </span>
-              <span className="ml-auto text-xs text-gray-500">
-                Seçili: {selectedRowKeys.length}
-              </span>
             </div>
           </div>
         )}
@@ -922,7 +968,6 @@ export default function StockExitPage() {
               });
 
             const rowTarget: RowTarget = c.rowTarget || "sale";
-            const unitLabel = selected?.areaUnit || "alan";
 
             const whOptions = [
               { value: "", label: "Depo", disabled: true },
@@ -943,233 +988,356 @@ export default function StockExitPage() {
               })),
             ];
 
-            const isSelected = selectedRowKeys.includes(c.key);
-
             return (
               <div
                 key={c.key}
-                className={exitMode === "component" ? ROW_GRID_COMPONENT : ROW_GRID_PRODUCT}
+                className="rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800 p-4"
               >
-                {/* Checkbox */}
-                <div className="flex items-center pt-6 md:pt-7">
-                  {exitMode === "component" && (
-                    <Checkbox
-                      checked={isSelected}
-                      onChange={() => toggleRowSelection(c.key)}
-                    />
-                  )}
-                </div>
-
-                {/* Component seçimi */}
-                <div data-comp-picker>
-                  <Label>Component</Label>
-
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    aria-expanded={c.open ? "true" : "false"}
-                    onClick={() => toggleDropdown(idx)}
-                    className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm shadow-theme-xs focus:outline-hidden focus:ring-3 cursor-pointer flex items-center justify-between dark:border-gray-700 dark:text-white/90"
-                  >
-                    <span className="truncate">
-                      {selected
-                        ? `${selected.barcode} — ${selected.name}`
-                        : c.expectedLabel
-                        ? `Beklenen: ${c.expectedLabel} (seçiniz)`
-                        : "Component seçin"}
-                    </span>
-                    <span className="ml-3 opacity-60">▾</span>
+                {/* ===================== MOBILE ===================== */}
+                <div className="block md:hidden">
+                  <div className="mb-3 flex items-center justify-end gap-3">
+                    <Button variant="outline" onClick={() => removeRow(c.key)}>
+                      Kaldır
+                    </Button>
                   </div>
 
-                  {c.open && (
-                    <div className="absolute z-20 mt-2 w-[min(920px,92vw)] rounded-xl border border-gray-200 bg-white p-3 shadow-xl dark:border-gray-800 dark:bg-gray-900">
-                      <div className="mb-3">
-                        <Input
-                          placeholder="Ara (barkod / tanım…)"
-                          value={q}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setSearch((s) => ({ ...s, [c.key]: val }));
-                            loadChoices(c.key, val, c.expectedMasterId);
+                  <div className="space-y-3">
+                    {/* Component */}
+                    <div data-comp-picker className="relative">
+                      <Label>Component</Label>
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        aria-expanded={c.open ? "true" : "false"}
+                        onClick={() => toggleDropdown(idx)}
+                        className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm shadow-theme-xs focus:outline-hidden focus:ring-3 cursor-pointer flex items-center justify-between dark:border-gray-700 dark:text-white/90"
+                      >
+                        <span className="truncate">
+                          {selected
+                            ? `${selected.barcode} — ${selected.name}`
+                            : c.expectedLabel
+                              ? `Beklenen: ${c.expectedLabel}`
+                              : "Component seçin"}
+                        </span>
+                        <span className="ml-3 opacity-60">▾</span>
+                      </div>
+
+                      {c.open && (
+                        <div className="absolute z-20 mt-2 w-[min(920px,92vw)] rounded-xl border border-gray-200 bg-white p-3 shadow-xl dark:border-gray-800 dark:bg-gray-900">
+                          <div className="mb-3">
+                            <Input
+                              placeholder="Ara (barkod / tanım…)"
+                              value={q}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setSearch((s) => ({ ...s, [c.key]: val }));
+                                loadChoices(c.key, val, c.expectedMasterId);
+                              }}
+                            />
+                          </div>
+
+                          <div className="max-h-[320px] overflow-auto">
+                            <table className="min-w-[800px] w-full text-sm">
+                              <thead>
+                                <tr className="text-left whitespace-nowrap text-gray-600 dark:text-gray-300">
+                                  <th className="px-3 py-2">Barkod</th>
+                                  <th className="px-3 py-2">Tanım</th>
+                                  <th className="px-3 py-2">Bimeks Kodu</th>
+                                  <th className="px-3 py-2">Ölçü Birimi</th>
+                                  <th className="px-3 py-2">Değer</th>
+                                  <th className="px-3 py-2">Depo</th>
+                                  <th className="px-3 py-2">Lokasyon</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-100 dark:divide-gray-800 text-gray-900 dark:text-gray-100">
+                                {visibleRows.length ? (
+                                  visibleRows.map((r) => (
+                                    <tr
+                                      key={r.id}
+                                      role="button"
+                                      tabIndex={0}
+                                      aria-selected={selected?.id === r.id}
+                                      onClick={() => chooseComponent(idx, r)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter" || e.key === " ") {
+                                          e.preventDefault();
+                                          chooseComponent(idx, r);
+                                        }
+                                      }}
+                                      className={`cursor-pointer transition ${
+                                        selected?.id === r.id
+                                          ? "bg-brand-500/5 dark:bg-brand-500/10"
+                                          : "hover:bg-gray-50/70 dark:hover:bg-white/5"
+                                      }`}
+                                    >
+                                      <td className="px-3 py-2">{r.barcode}</td>
+                                      <td className="px-3 py-2">{r.name}</td>
+                                      <td className="px-3 py-2">{r.bimeks_code || "—"}</td>
+                                      <td className="px-3 py-2">{getStockUnitDisplay(r.stock_unit)}</td>
+                                      <td className="px-3 py-2">{getStockValueDisplay(r)}</td>
+                                      <td className="px-3 py-2">{r.warehouse.name}</td>
+                                      <td className="px-3 py-2">{r.location.name}</td>
+                                    </tr>
+                                  ))
+                                ) : (
+                                  <tr>
+                                    <td className="px-3 py-6 text-gray-500 dark:text-gray-400" colSpan={7}>
+                                      Kayıt bulunamadı
+                                    </td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+
+                          <div className="mt-3 flex justify-end">
+                            <Button variant="outline" onClick={() => toggleDropdown(idx, false)}>
+                              Kapat
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Çıkış şekli + Hedef */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <Label>Çıkış Şekli</Label>
+                        <Select
+                          options={[
+                            { value: "unit", label: "Adet" },
+                            { value: "quantity", label: "Miktar" },
+                          ]}
+                          value={c.qtyMode || "unit"}
+                          onChange={(v: string) => {
+                            const mode = (v as QtyMode) || "unit";
+                            setComponents((prev) =>
+                              prev.map((x) => {
+                                if (x.key !== c.key) return x;
+                                if (exitMode === "component" && (x.rowTarget || "sale") === "stock") {
+                                  return { ...x, qtyMode: "unit", consumeQty: undefined };
+                                }
+                                if (mode === "unit")
+                                  return { ...x, qtyMode: "unit", consumeQty: undefined };
+                                const m = getMeasure(x.stock);
+                                return { ...x, qtyMode: "quantity", consumeQty: m.max || undefined };
+                              })
+                            );
                           }}
+                          disabled={exitMode === "component" && rowTarget === "stock"}
+                          placeholder="Seçiniz"
                         />
                       </div>
 
-                      <div className="max-h-[320px] overflow-auto">
-                        <table className="min-w-[800px] w-full text-sm">
-                          <thead>
-                            <tr className="text-left whitespace-nowrap text-gray-600 dark:text-gray-300">
-                              <th className="px-3 py-2">Barkod</th>
-                              <th className="px-3 py-2">Tanım</th>
-                              <th className="px-3 py-2">Alan</th>
-                              <th className="px-3 py-2">Birim</th>
-                              <th className="px-3 py-2">Depo</th>
-                              <th className="px-3 py-2">Lokasyon</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-100 dark:divide-gray-800 text-gray-900 dark:text-gray-100">
-                            {visibleRows.length ? (
-                              visibleRows.map((r) => (
-                                <tr
-                                  key={r.id}
-                                  role="button"
-                                  tabIndex={0}
-                                  aria-selected={selected?.id === r.id}
-                                  onClick={() => chooseComponent(idx, r)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter" || e.key === " ") {
-                                      e.preventDefault();
-                                      chooseComponent(idx, r);
-                                    }
-                                  }}
-                                  className={`cursor-pointer transition ${
-                                    selected?.id === r.id
-                                      ? "bg-brand-500/5 dark:bg-brand-500/10"
-                                      : "hover:bg-gray-50/70 dark:hover:bg-white/5"
-                                  }`}
-                                >
-                                  <td className="px-3 py-2">{r.barcode}</td>
-                                  <td className="px-3 py-2">{r.name}</td>
-                                  <td className="px-3 py-2">{r.area}</td>
-                                  <td className="px-3 py-2">{r.areaUnit}</td>
-                                  <td className="px-3 py-2">
-                                    {r.warehouse.name}
-                                  </td>
-                                  <td className="px-3 py-2">
-                                    {r.location.name}
-                                  </td>
-                                </tr>
-                              ))
-                            ) : (
-                              <tr>
-                                <td
-                                  className="px-3 py-6 text-gray-500 dark:text-gray-400"
-                                  colSpan={6}
-                                >
-                                  Kayıt bulunamadı
-                                </td>
-                              </tr>
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-
-                      <div className="mt-3 flex justify-end">
-                        <Button
-                          variant="outline"
-                          onClick={() => toggleDropdown(idx, false)}
-                        >
-                          Kapat
-                        </Button>
+                      <div>
+                        <Label>Hedef</Label>
+                        <Select
+                          options={[
+                            { value: "sale", label: "Satış" },
+                            { value: "stock", label: "Depo" },
+                          ]}
+                          value={rowTarget}
+                          onChange={(v: string) => setRowTarget(c.key, v as RowTarget)}
+                          placeholder="Seçiniz"
+                        />
                       </div>
                     </div>
-                  )}
 
-                  {selected && (
-                    <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    {/* Miktar */}
+                    <div>
                       {(() => {
-                        const totalRaw = masterTotals[selected.master_id]; // master bazında toplam alan
-                        const hasTotal = typeof totalRaw === "number";
-
-                        const usedBefore = components
-                          .slice(0, idx)
-                          .filter(
-                            (x) => x.stock?.master_id === selected.master_id
-                          )
-                          .reduce((sum, x) => {
-                            const u = Number(x.consumeQty || 0);
-                            return sum + (Number.isFinite(u) && u > 0 ? u : 0);
-                          }, 0);
-
-                        const usedCurrent =
-                          Number.isFinite(Number(c.consumeQty)) &&
-                          Number(c.consumeQty) > 0
-                            ? Number(c.consumeQty)
-                            : null;
-
-                        const totalAdj = hasTotal
-                          ? Math.max(0, totalRaw - usedBefore)
-                          : null;
-                        const remaining =
-                          totalAdj !== null && usedCurrent !== null
-                            ? Math.max(0, totalAdj - usedCurrent)
-                            : null;
-
-                        const unit = selected.areaUnit;
+                        const mode = c.qtyMode || "unit";
+                        const m = getMeasure(selected);
+                        const label = mode === "unit" ? "Miktar (Adet)" : `Miktar (${unitLabelTR(selected?.stock_unit)})`;
 
                         return (
                           <>
-                            <span>
-                              Toplam Alan:{" "}
-                              <span
-                                className={toneClass(
-                                  Number(totalAdj ?? NaN),
-                                  true
-                                )}
-                              >
-                                {totalAdj !== null ? totalAdj : "…"}
-                              </span>{" "}
-                              {unit}
-                            </span>
-                            {"  •  "}
-                            <span>
-                              {selected.warehouse.name} /{" "}
-                              {selected.location.name}
-                            </span>
-                            {"  •  "}
-                            <span>
-                              Kullanım sonrası kalan{" "}
-                              {remaining !== null ? (
-                                <>
-                                  <span className={toneClass(remaining, true)}>
-                                    {remaining}
-                                  </span>{" "}
-                                  {unit}
-                                </>
-                              ) : (
-                                "—"
-                              )}
-                            </span>
+                            <Label>{label}</Label>
+                            <Input
+                              type="number"
+                              min="0"
+                              max={String(m.max || 0)}
+                              value={mode === "quantity" ? (c.consumeQty ?? "") : ""}
+                              onChange={(e) => setConsumeQty(c.key, e.target.value)}
+                              placeholder={mode === "quantity" && selected ? `0 - ${m.max}` : ""}
+                              disabled={mode !== "quantity" || !selected}
+                              className="w-full"
+                            />
                           </>
                         );
                       })()}
                     </div>
-                  )}
 
-                  {!selected && c.expectedLabel && (
-                    <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                      Beklenen: {c.expectedLabel}
-                    </div>
-                  )}
+                    {/* Depo + Lokasyon */}
+                    {exitMode === "component" && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className={disabledWrap(rowTarget !== "stock")}>
+                          <Label>Depo</Label>
+                          <Select
+                            options={whOptions}
+                            value={c.rowWarehouseId || ""}
+                            onChange={(v: string) => setRowWarehouse(c.key, v)}
+                            placeholder="Depo"
+                            disabled={rowTarget !== "stock"}
+                          />
+                        </div>
+
+                        <div className={disabledWrap(rowTarget !== "stock" || !c.rowWarehouseId)}>
+                          <Label>Lokasyon</Label>
+                          <Select
+                            options={locOptions}
+                            value={c.rowLocationId || ""}
+                            onChange={(v: string) => setRowLocation(c.key, v)}
+                            placeholder="Lokasyon"
+                            disabled={rowTarget !== "stock" || !c.rowWarehouseId}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Stok özeti */}
+                    {selected && (
+                      <div className="text-xs text-gray-500 dark:text-gray-400">
+                        {(() => {
+                          const mode: QtyMode = c.qtyMode || "unit";
+                          const masterId = selected.master_id;
+                          const usedBeforeUnits = components
+                            .slice(0, idx)
+                            .filter((x) => x.stock?.master_id === masterId && (x.qtyMode || "unit") === "unit").length;
+
+                          if (mode === "unit") {
+                            const total = masterCounts[masterId];
+                            const hasTotal = typeof total === "number";
+                            const after = hasTotal ? Math.max(0, total - usedBeforeUnits - 1) : null;
+
+                            return (
+                              <>
+                                Depoda: <span className={toneClass(Number(total ?? NaN), true)}>{hasTotal ? total : "…"}</span> • 
+                                Sonrası: {after !== null ? <span className={toneClass(after, true)}>{after}</span> : "—"}
+                              </>
+                            );
+                          }
+
+                          const m = getMeasure(selected);
+                          const used = Number(c.consumeQty || 0);
+                          const after = Math.max(0, (m.max || 0) - used);
+
+                          return (
+                            <>
+                              Mevcut: <span className={toneClass(m.max, true)}>{m.max}</span> • 
+                              Sonrası: <span className={toneClass(after, true)}>{after}</span>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
-                {/* Miktar (yanında birim) */}
-                <div>
-                  <Label>{`Miktar (${unitLabel})`}</Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    max={String(selected?.area ?? 0)}
-                    value={c.consumeQty ?? ""}
-                    onChange={(e) => setConsumeQty(c.key, e.target.value)}
-                    className="w-full md:max-w-[140px]"
-                    placeholder={
-                      selected
-                        ? `0 - ${selected.area}`
-                        : c.expectedLabel
-                        ? `Öneri: ${c.consumeQty ?? ""}`
-                        : ""
-                    }
-                    disabled={!selected && !c.expectedMasterId}
-                  />
-                </div>
+                {/* ===================== DESKTOP ===================== */}
+                {exitMode === "component" ? (
+                  /* COMPONENT MODU: 2 Satır Grid (Stok Girişi gibi) */
+                  <div className="hidden md:block">
+                    <div className="space-y-2">
+                    {/* SATIR 1: Component | Hedef | Ölçü Birimi | Miktar */}
+                    <div className="grid grid-cols-[2.5fr_1fr_1fr_1fr] gap-3 items-center">
+                      {/* Component seçici */}
+                      <div data-comp-picker className="relative">
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          aria-expanded={c.open ? "true" : "false"}
+                          onClick={() => toggleDropdown(idx)}
+                          className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm shadow-theme-xs focus:outline-hidden focus:ring-3 cursor-pointer flex items-center justify-between dark:border-gray-700 dark:text-white/90"
+                        >
+                          <span className="truncate">
+                            {selected
+                              ? `${selected.barcode} — ${selected.name}`
+                              : c.expectedLabel
+                                ? `Beklenen: ${c.expectedLabel}`
+                                : "Component seçin"}
+                          </span>
+                          <span className="ml-3 opacity-60">▾</span>
+                        </div>
 
-                {/* Hedef / Depo / Lokasyon sadece component modunda */}
-                {exitMode === "component" && (
-                  <>
-                    {/* Hedef */}
-                    <div>
-                      <Label>Hedef</Label>
+                        {c.open && (
+                          <div className="absolute z-20 mt-2 w-[min(920px,92vw)] rounded-xl border border-gray-200 bg-white p-3 shadow-xl dark:border-gray-800 dark:bg-gray-900">
+                            <div className="mb-3">
+                              <Input
+                                placeholder="Ara (barkod / tanım…)"
+                                value={q}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setSearch((s) => ({ ...s, [c.key]: val }));
+                                  loadChoices(c.key, val, c.expectedMasterId);
+                                }}
+                              />
+                            </div>
+
+                            <div className="max-h-[320px] overflow-auto">
+                              <table className="min-w-[800px] w-full text-sm">
+                                <thead>
+                                  <tr className="text-left whitespace-nowrap text-gray-600 dark:text-gray-300">
+                                    <th className="px-3 py-2">Barkod</th>
+                                    <th className="px-3 py-2">Tanım</th>
+                                    <th className="px-3 py-2">Bimeks Kodu</th>
+                                    <th className="px-3 py-2">Ölçü Birimi</th>
+                                    <th className="px-3 py-2">Değer</th>
+                                    <th className="px-3 py-2">Depo</th>
+                                    <th className="px-3 py-2">Lokasyon</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100 dark:divide-gray-800 text-gray-900 dark:text-gray-100">
+                                  {visibleRows.length ? (
+                                    visibleRows.map((r) => (
+                                      <tr
+                                        key={r.id}
+                                        role="button"
+                                        tabIndex={0}
+                                        aria-selected={selected?.id === r.id}
+                                        onClick={() => chooseComponent(idx, r)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === "Enter" || e.key === " ") {
+                                            e.preventDefault();
+                                            chooseComponent(idx, r);
+                                          }
+                                        }}
+                                        className={`cursor-pointer transition ${
+                                          selected?.id === r.id
+                                            ? "bg-brand-500/5 dark:bg-brand-500/10"
+                                            : "hover:bg-gray-50/70 dark:hover:bg-white/5"
+                                        }`}
+                                      >
+                                        <td className="px-3 py-2">{r.barcode}</td>
+                                        <td className="px-3 py-2">{r.name}</td>
+                                        <td className="px-3 py-2">{r.bimeks_code || "—"}</td>
+                                        <td className="px-3 py-2">{getStockUnitDisplay(r.stock_unit)}</td>
+                                        <td className="px-3 py-2">{getStockValueDisplay(r)}</td>
+                                        <td className="px-3 py-2">{r.warehouse.name}</td>
+                                        <td className="px-3 py-2">{r.location.name}</td>
+                                      </tr>
+                                    ))
+                                  ) : (
+                                    <tr>
+                                      <td className="px-3 py-6 text-gray-500 dark:text-gray-400" colSpan={7}>
+                                        Kayıt bulunamadı
+                                      </td>
+                                    </tr>
+                                  )}
+                                </tbody>
+                              </table>
+                            </div>
+
+                            <div className="mt-3 flex justify-end">
+                              <Button variant="outline" onClick={() => toggleDropdown(idx, false)}>
+                                Kapat
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Hedef */}
                       <Select
                         options={[
                           { value: "sale", label: "Satış" },
@@ -1177,51 +1345,278 @@ export default function StockExitPage() {
                         ]}
                         value={rowTarget}
                         onChange={(v: string) => setRowTarget(c.key, v as RowTarget)}
-                        placeholder="Seçiniz"
+                        placeholder="Hedef"
                       />
-                    </div>
 
-                    {/* Depo */}
-                    <div>
-                      {rowTarget === "stock" && (
-                        <>
-                          <Label>Depo</Label>
-                          <Select
-                            options={whOptions}
-                            value={c.rowWarehouseId || ""}
-                            onChange={(v: string) => setRowWarehouse(c.key, v)}
-                            placeholder="Depo"
+                      {/* Ölçü Birimi (Çıkış Şekli) */}
+                      <Select
+                        options={[
+                          { value: "unit", label: "Adet" },
+                          { value: "quantity", label: "Miktar" },
+                        ]}
+                        value={c.qtyMode || "unit"}
+                        onChange={(v: string) => {
+                          const mode = (v as QtyMode) || "unit";
+                          setComponents((prev) =>
+                            prev.map((x) => {
+                              if (x.key !== c.key) return x;
+                              if (exitMode === "component" && (x.rowTarget || "sale") === "stock") {
+                                return { ...x, qtyMode: "unit", consumeQty: undefined };
+                              }
+                              if (mode === "unit")
+                                return { ...x, qtyMode: "unit", consumeQty: undefined };
+                              const m = getMeasure(x.stock);
+                              return { ...x, qtyMode: "quantity", consumeQty: m.max || undefined };
+                            })
+                          );
+                        }}
+                        disabled={exitMode === "component" && rowTarget === "stock"}
+                        placeholder="Ölçü Birimi"
+                      />
+
+                      {/* Miktar */}
+                      {(() => {
+                        const mode = c.qtyMode || "unit";
+                        const m = getMeasure(selected);
+
+                        return (
+                          <Input
+                            type="number"
+                            min="0"
+                            max={String(m.max || 0)}
+                            value={mode === "quantity" ? (c.consumeQty ?? "") : ""}
+                            onChange={(e) => setConsumeQty(c.key, e.target.value)}
+                            placeholder={mode === "unit" ? "Adet" : mode === "quantity" && selected ? unitLabelTR(selected?.stock_unit) : "Miktar"}
+                            disabled={mode !== "quantity" || !selected}
                           />
-                        </>
-                      )}
+                        );
+                      })()}
                     </div>
 
-                    {/* Lokasyon */}
-                    <div>
-                      {rowTarget === "stock" && (
-                        <>
-                          <Label>Lokasyon</Label>
-                          <Select
-                            options={locOptions}
-                            value={c.rowLocationId || ""}
-                            onChange={(v: string) => setRowLocation(c.key, v)}
-                            placeholder="Lokasyon"
-                          />
-                        </>
-                      )}
-                    </div>
-                  </>
-                )}
+                    {/* SATIR 2: Stok özeti | Depo | Lokasyon | Kaldır */}
+                    <div className="grid grid-cols-[2.5fr_1fr_1fr_1fr] gap-3 items-center">
+                      {/* Stok özeti */}
+                      <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                        {selected ? (
+                          (() => {
+                            const mode: QtyMode = c.qtyMode || "unit";
+                            const masterId = selected.master_id;
+                            const usedBeforeUnits = components
+                              .slice(0, idx)
+                              .filter((x) => x.stock?.master_id === masterId && (x.qtyMode || "unit") === "unit").length;
 
-                {/* Aksiyon sütunu (Kaldır) */}
-                <div className="md:justify-self-end">
-                  <Label className="invisible">Aksiyon</Label>
-                  <div className="h-11 flex items-center">
-                    <Button variant="outline" onClick={() => removeRow(c.key)}>
-                      Kaldır
-                    </Button>
+                            if (mode === "unit") {
+                              const total = masterCounts[masterId];
+                              const hasTotal = typeof total === "number";
+                              const after = hasTotal ? Math.max(0, total - usedBeforeUnits - 1) : null;
+
+                              return (
+                                <>
+                                  Depoda: <span className={toneClass(Number(total ?? NaN), true)}>{hasTotal ? total : "…"}</span> • 
+                                  Sonrası: {after !== null ? <span className={toneClass(after, true)}>{after}</span> : "—"}
+                                </>
+                              );
+                            }
+
+                            const m = getMeasure(selected);
+                            const used = Number(c.consumeQty || 0);
+                            const after = Math.max(0, (m.max || 0) - used);
+
+                            return (
+                              <>
+                                Mevcut: <span className={toneClass(m.max, true)}>{m.max}</span> • 
+                                Sonrası: <span className={toneClass(after, true)}>{after}</span>
+                              </>
+                            );
+                          })()
+                        ) : c.expectedLabel ? (
+                          `Beklenen: ${c.expectedLabel}`
+                        ) : (
+                          "—"
+                        )}
+                      </div>
+
+                      {/* Depo (component modunda) */}
+                      {exitMode === "component" ? (
+                        <Select
+                          options={whOptions}
+                          value={c.rowWarehouseId || ""}
+                          onChange={(v: string) => setRowWarehouse(c.key, v)}
+                          placeholder="Depo"
+                          disabled={rowTarget !== "stock"}
+                        />
+                      ) : <div />}
+
+                      {/* Lokasyon (component modunda) */}
+                      {exitMode === "component" ? (
+                        <Select
+                          options={locOptions}
+                          value={c.rowLocationId || ""}
+                          onChange={(v: string) => setRowLocation(c.key, v)}
+                          placeholder="Lokasyon"
+                          disabled={rowTarget !== "stock" || !c.rowWarehouseId}
+                        />
+                      ) : <div />}
+
+                      {/* Kaldır butonu */}
+                      <Button
+                        variant="outline"
+                        onClick={() => removeRow(c.key)}
+                      >
+                        Kaldır
+                      </Button>
+                    </div>
                   </div>
                 </div>
+                ) : (
+                  /* ÜRÜN OLUŞTURMA MODU: Basit Tek Satır */
+                  <div className="hidden md:grid md:grid-cols-[2fr_1fr_1fr_auto] gap-3 items-center">
+                    {/* Component seçici */}
+                    <div data-comp-picker className="relative">
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        aria-expanded={c.open ? "true" : "false"}
+                        onClick={() => toggleDropdown(idx)}
+                        className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm shadow-theme-xs focus:outline-hidden focus:ring-3 cursor-pointer flex items-center justify-between dark:border-gray-700 dark:text-white/90"
+                      >
+                        <span className="truncate">
+                          {selected
+                            ? `${selected.barcode} — ${selected.name}`
+                            : c.expectedLabel
+                              ? `Beklenen: ${c.expectedLabel}`
+                              : "Component seçin"}
+                        </span>
+                        <span className="ml-3 opacity-60">▾</span>
+                      </div>
+
+                      {c.open && (
+                        <div className="absolute z-20 mt-2 w-[min(920px,92vw)] rounded-xl border border-gray-200 bg-white p-3 shadow-xl dark:border-gray-800 dark:bg-gray-900">
+                          <div className="mb-3">
+                            <Input
+                              placeholder="Ara (barkod / tanım…)"
+                              value={q}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setSearch((s) => ({ ...s, [c.key]: val }));
+                                loadChoices(c.key, val, c.expectedMasterId);
+                              }}
+                            />
+                          </div>
+
+                          <div className="max-h-[320px] overflow-auto">
+                            <table className="min-w-[800px] w-full text-sm">
+                              <thead>
+                                <tr className="text-left whitespace-nowrap text-gray-600 dark:text-gray-300">
+                                  <th className="px-3 py-2">Barkod</th>
+                                  <th className="px-3 py-2">Tanım</th>
+                                  <th className="px-3 py-2">Bimeks Kodu</th>
+                                  <th className="px-3 py-2">Ölçü Birimi</th>
+                                  <th className="px-3 py-2">Değer</th>
+                                  <th className="px-3 py-2">Depo</th>
+                                  <th className="px-3 py-2">Lokasyon</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-100 dark:divide-gray-800 text-gray-900 dark:text-gray-100">
+                                {visibleRows.length ? (
+                                  visibleRows.map((r) => (
+                                    <tr
+                                      key={r.id}
+                                      role="button"
+                                      tabIndex={0}
+                                      aria-selected={selected?.id === r.id}
+                                      onClick={() => chooseComponent(idx, r)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter" || e.key === " ") {
+                                          e.preventDefault();
+                                          chooseComponent(idx, r);
+                                        }
+                                      }}
+                                      className={`cursor-pointer transition ${
+                                        selected?.id === r.id
+                                          ? "bg-brand-500/5 dark:bg-brand-500/10"
+                                          : "hover:bg-gray-50/70 dark:hover:bg-white/5"
+                                      }`}
+                                    >
+                                      <td className="px-3 py-2">{r.barcode}</td>
+                                      <td className="px-3 py-2">{r.name}</td>
+                                      <td className="px-3 py-2">{r.bimeks_code || "—"}</td>
+                                      <td className="px-3 py-2">{getStockUnitDisplay(r.stock_unit)}</td>
+                                      <td className="px-3 py-2">{getStockValueDisplay(r)}</td>
+                                      <td className="px-3 py-2">{r.warehouse.name}</td>
+                                      <td className="px-3 py-2">{r.location.name}</td>
+                                    </tr>
+                                  ))
+                                ) : (
+                                  <tr>
+                                    <td className="px-3 py-6 text-gray-500 dark:text-gray-400" colSpan={7}>
+                                      Kayıt bulunamadı
+                                    </td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+
+                          <div className="mt-3 flex justify-end">
+                            <Button variant="outline" onClick={() => toggleDropdown(idx, false)}>
+                              Kapat
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Ölçü Birimi */}
+                    <Select
+                      options={[
+                        { value: "unit", label: "Adet" },
+                        { value: "quantity", label: "Miktar" },
+                      ]}
+                      value={c.qtyMode || "unit"}
+                      onChange={(v: string) => {
+                        const mode = (v as QtyMode) || "unit";
+                        setComponents((prev) =>
+                          prev.map((x) => {
+                            if (x.key !== c.key) return x;
+                            if (mode === "unit")
+                              return { ...x, qtyMode: "unit", consumeQty: undefined };
+                            const m = getMeasure(x.stock);
+                            return { ...x, qtyMode: "quantity", consumeQty: m.max || undefined };
+                          })
+                        );
+                      }}
+                      placeholder="Ölçü Birimi"
+                    />
+
+                    {/* Miktar */}
+                    {(() => {
+                      const mode = c.qtyMode || "unit";
+                      const m = getMeasure(selected);
+
+                      return (
+                        <Input
+                          type="number"
+                          min="0"
+                          max={String(m.max || 0)}
+                          value={mode === "quantity" ? (c.consumeQty ?? "") : ""}
+                          onChange={(e) => setConsumeQty(c.key, e.target.value)}
+                          placeholder={mode === "unit" ? "Adet" : mode === "quantity" && selected ? unitLabelTR(selected?.stock_unit) : "Miktar"}
+                          disabled={mode !== "quantity" || !selected}
+                        />
+                      );
+                    })()}
+
+                    {/* Kaldır butonu */}
+                    <Button
+                      variant="outline"
+                      className="h-10 w-10 p-0"
+                      onClick={() => removeRow(c.key)}
+                    >
+                      <span aria-hidden>-</span>
+                    </Button>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -1233,7 +1628,6 @@ export default function StockExitPage() {
           </div>
         </div>
 
-        {/* ALT BUTONLAR */}
         {exitMode === "product" && (
           <div className="mt-6 flex flex-wrap items-center gap-3">
             {recipeSelect === "new" && (
