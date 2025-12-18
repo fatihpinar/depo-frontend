@@ -2,7 +2,7 @@ name: Deploy Frontend
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, bimeks ]
 
 jobs:
   build-and-deploy:
@@ -25,7 +25,33 @@ jobs:
       - name: Pack dist
         run: tar -czf dist.tar.gz -C dist .
 
-      - name: Upload dist to server
+      # --- Upload dist to DEMO (main) ---
+      - name: Upload dist to DEMO server
+        if: github.ref == 'refs/heads/main'
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEMO_SSH_HOST }}
+          username: ${{ secrets.DEMO_SSH_USER }}
+          key: ${{ secrets.DEMO_SSH_KEY }}
+          source: "dist.tar.gz"
+          target: "/srv/depo-frontend/"
+
+      - name: Activate DEMO release
+        if: github.ref == 'refs/heads/main'
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEMO_SSH_HOST }}
+          username: ${{ secrets.DEMO_SSH_USER }}
+          key: ${{ secrets.DEMO_SSH_KEY }}
+          script: |
+            sudo /usr/local/bin/deploy-depo-frontend.sh
+            sudo systemctl reload nginx
+          timeout: 60s
+          command_timeout: 5m
+
+      # --- Upload dist to BIMEKS (bimeks branch) ---
+      - name: Upload dist to BIMEKS server
+        if: github.ref == 'refs/heads/bimeks'
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -34,7 +60,8 @@ jobs:
           source: "dist.tar.gz"
           target: "/srv/depo-frontend/"
 
-      - name: Activate new release
+      - name: Activate BIMEKS release
+        if: github.ref == 'refs/heads/bimeks'
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
