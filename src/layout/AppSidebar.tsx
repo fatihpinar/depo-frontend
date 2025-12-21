@@ -2,12 +2,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { onPermsChange, arePermsReady, hasAny } from "../components/auth/permissions";
+import { PackageCheck } from "lucide-react";
+import { Warehouse } from "lucide-react";
+import { Package } from "lucide-react";
+import { TableProperties } from "lucide-react";
 
 // Icon'lar
 import {
   GridIcon,
-  ListIcon,
-  TableIcon,
   ChevronDownIcon,
   HorizontaLDots,
   TaskIcon,
@@ -49,11 +51,11 @@ function canSee(path?: string): boolean {
 const navItems: NavItem[] = [
   { icon: <GridIcon />, name: "Dashboard", path: "/" },
 
-  { icon: <ListIcon />, name: "Stok Girişi", path: "/inventory/stock-entry" },
-  { icon: <ListIcon />, name: "Stok Çıkışı / Ürün", path: "/inventory/stock-exit" },
-
+  { icon: <Warehouse />, name: "Stok Girişi", path: "/inventory/stock-entry" },
+  { icon: <PackageCheck />, name: "Stok Girişi Tamamlama", path: "/stock-receipts" },
+  { icon: <Package />, name: "Stok Çıkışı", path: "/inventory/stock-exit" },
   {
-    icon: <TableIcon />,
+    icon: <TableProperties />,
     name: "Listeler",
     subItems: [
       { name: "Tanım Listesi", path: "/inventory/masters" },
@@ -63,7 +65,7 @@ const navItems: NavItem[] = [
     ],
   },
 
-  { icon: <TaskIcon />, name: "Stok Girişi Tamamlama", path: "/stock-receipts" },
+  
   { icon: <TaskIcon />, name: "Üretim Tamamlama", path: "/production-receipts" },
   { icon: <TaskIcon />, name: "Serigrafi Tamamlama", path: "/screenprint-receipts" },
 ];
