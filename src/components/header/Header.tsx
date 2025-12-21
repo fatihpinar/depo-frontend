@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ThemeToggleButton } from "../common/ThemeToggleButton";
 import UserDropdown from "./UserDropdown";
 import { Link } from "react-router";
-import { UserRound, HelpCircle, LogOut, CircleUserRound, ChevronDown } from "lucide-react";
+import { Menu, MoreHorizontal } from "lucide-react";
 
 // Define the interface for the props
 interface HeaderProps {
@@ -52,38 +52,6 @@ const Header: React.FC<HeaderProps> = ({ onClick, onToggle }) => {
           >
             <MoreHorizontal className="w-6 h-6" />
           </button>
-
-          <div className="block">
-            <form action="https://formbold.com/s/unique_form_id" method="POST">
-              <div className="relative">
-                <button
-                  className="absolute -translate-y-1/2 left-4 top-1/2"
-                  type="button"
-                  aria-label="Search"
-                >
-                  <Search className="w-5 h-5 text-gray-500 dark:text-gray-400" />
-                </button>
-
-                <input
-                  type="text"
-                  placeholder="ROBİŞ TEST 123"
-                  className="dark:bg-dark-900 h-11 w-full rounded-lg border border-gray-200 bg-transparent py-2.5 pl-12 pr-14 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-800 dark:bg-gray-900 dark:bg-white/[0.03] dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800 xl:w-[430px]"
-                />
-
-                {/* Sağdaki ⌘K yerine QR icon */}
-                <button
-                  type="button"
-                  aria-label="QR ile ara"
-                  className="absolute right-3 top-1/2 -translate-y-1/2
-                            inline-flex items-center justify-center
-                            text-gray-500 hover:text-gray-700
-                            dark:text-gray-400 dark:hover:text-gray-200"
-                >
-                  <QrCode className="w-5 h-5" />
-                </button>
-              </div>
-            </form>
-          </div>
         </div>
 
         <div
