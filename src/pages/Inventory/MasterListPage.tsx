@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import PageMeta from "../../components/common/PageMeta";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import ComponentCard from "../../components/common/ComponentCard";
@@ -9,244 +9,254 @@ import api from "../../services/api";
 import { Link } from "react-router-dom";
 import * as XLSX from "xlsx";
 
-/* ================== EXCEL EXPORT ================== */
-const UNIT_LABEL_MAP: Record<string, string> = {
-  length: "length (m)",
-  unit: "unit (EA)",
-  weight: "weight (kg)",
-  area: "area (m²)",
-};
-
-function toNumberSafe(v: any) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function formatUnitForExcel(unit?: string | null) {
-  if (!unit) return "";
-  return UNIT_LABEL_MAP[unit] ?? unit;
-}
+/* ================== EXCEL EXPORT (YALIN) ================== */
 
 function exportToExcel(rows: Row[]) {
   const data = rows.map((r) => ({
-    "Bimeks Kodu": r.bimeks_code ?? "",
-    "Bimeks Ürün Tanımı": r.bimeks_product_name ?? "",
-
-    // ✅ Tek kolonda: length (m) / area (m²) / weight (kg) / unit (EA)
-    "Ölçü Birimi": formatUnitForExcel(r.stock_unit),
-
-    // ✅ SADE SAYI (Excel için birim yok)
-    "Toplam Miktar": toNumberSafe(r.total_qty),
-
-    "Toplam Adet": toNumberSafe(r.total_count),
-
-    "Ürün Türü": r.product_type_name ?? "",
-    "Taşıyıcı Türü": r.carrier_type_name ?? "",
+    "Ürün Tanımı": r.display_label ?? "",
+    "Kategori": r.category_name ?? "",
+    "Tür": r.type_name ?? "",
     "Tedarikçi": r.supplier_name ?? "",
-    "Tedarikçi Ürün Kodu": r.supplier_product_code ?? "",
-    "Taşıyıcı Renk": r.carrier_color_name ?? "",
-    "Liner Renk": r.liner_color_name ?? "",
-    "Liner Türü": r.liner_type_name ?? "",
-    "Yapışkan Türü": r.adhesive_type_name ?? "",
-    "Kalınlık": r.thickness ?? "",
-    "Taşıyıcı Yoğunluk": r.carrier_density ?? "",
-
-    // ✅ Tarihler (UI gibi)
+    "Ölçü Birimi": r.stock_unit_label ?? r.stock_unit_code ?? "",
     "Oluşturma": r.created_at ? new Date(r.created_at).toLocaleString() : "",
     "Güncelleme": r.updated_at ? new Date(r.updated_at).toLocaleString() : "",
   }));
 
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(data);
-  XLSX.utils.book_append_sheet(wb, ws, "Master Tanımlar");
+  XLSX.utils.book_append_sheet(wb, ws, "Tanımlar");
   XLSX.writeFile(wb, "master-tanimlar.xlsx");
 }
 
 /* ================== TYPES ================== */
 
+type StockUnitCode = "area" | "weight" | "length" | "unit";
+
 type Lookup = {
   id: number;
   name: string;
-  display_code?: string | null;
+};
+
+type StockUnit = {
+  id: number;
+  code: StockUnitCode;
+  label: string;
+  is_active?: boolean;
+  sort_order?: number;
 };
 
 type Row = {
-
   id: number;
-  bimeks_code: string | null;
-  bimeks_product_name: string | null;
-  stock_unit?: "area" | "weight" | "length" | "unit" | null;
-  total_count?: number | string | null; // ✅ toplam adet
-  total_qty?: number | string | null;   // ✅ toplam miktar
-  product_type_id: number;
-  carrier_type_id: number | null;
-  supplier_id: number;
-  supplier_product_code: string | null;
-  thickness: number | null;
-  carrier_density: number | null;
-  carrier_color_id: number | null;
-  liner_color_id: number | null;
-  liner_type_id: number | null;
-  adhesive_type_id: number | null;
+  display_label: string;
+
+  category_id: number;
+  type_id: number;
+  supplier_id?: number | null;
+  stock_unit_id: number;
+
+  // join fields (backend döndürebilir; dönmezse FE map’ler)
+  category_name?: string | null;
+  type_name?: string | null;
+  supplier_name?: string | null;
+  stock_unit_code?: StockUnitCode | null;
+  stock_unit_label?: string | null;
 
   created_at?: string;
   updated_at?: string;
-
-  product_type_name?: string | null;
-  carrier_type_name?: string | null;
-  supplier_name?: string | null;
-  carrier_color_name?: string | null;
-  liner_color_name?: string | null;
-  liner_type_name?: string | null;
-  adhesive_type_name?: string | null;
-
-  total_unit_count?: number | string | null;
-  total_area_sum?: number | string | null;
 };
 
 export default function MasterListPage() {
   const [rows, setRows] = useState<Row[]>([]);
-  const [q, setQ] = useState("");
-
-  const [productTypeId, setProductTypeId] = useState<string>("");
-  const [supplierId, setSupplierId] = useState<string>("");
-
   const [loading, setLoading] = useState(false);
 
-  const [productTypes, setProductTypes] = useState<Lookup[]>([]);
+  // filters
+  const [q, setQ] = useState("");
+  const [categoryId, setCategoryId] = useState<string>("");
+  const [typeId, setTypeId] = useState<string>("");
+  const [supplierId, setSupplierId] = useState<string>("");
+
+  // lookups
+  const [categories, setCategories] = useState<Lookup[]>([]);
+  const [types, setTypes] = useState<{ id: number; name: string; category_id: number }[]>([]);
   const [suppliers, setSuppliers] = useState<Lookup[]>([]);
-  const unitLabel = (u?: string | null) => {
-    if (u === "area") return "Alan (m²)";
-    if (u === "weight") return "Ağırlık (kg)";
-    if (u === "length") return "Uzunluk (m)";
-    if (u === "unit") return "Adet";
-    return "—";
-  };
+  const [stockUnits, setStockUnits] = useState<StockUnit[]>([]);
 
-  const unitSuffix = (u?: string | null) => {
-    if (u === "area") return "m²";
-    if (u === "weight") return "kg";
-    if (u === "length") return "m";
-    if (u === "unit") return "EA";
-    return "";
-  };
+  /* ================== HELPERS ================== */
 
-  const formatQty = (val: any) => {
-    const n = Number(val);
-    if (!Number.isFinite(n)) return "0";
-    return n.toLocaleString("tr-TR", { maximumFractionDigits: 3 });
-  };
+  const hydrateRow = useCallback(
+    (r: Row): Row => {
+      const catName =
+        r.category_name ??
+        categories.find((c) => c.id === r.category_id)?.name ??
+        null;
 
-  /* ========== DATA FETCH ========== */
+      const typeName =
+        r.type_name ??
+        types.find((t) => t.id === r.type_id)?.name ??
+        null;
 
-  const fetchData = async () => {
+      const supplierName =
+        r.supplier_name ??
+        suppliers.find((s) => s.id === r.supplier_id)?.name ??
+        null;
+
+      const su = stockUnits.find((x) => x.id === r.stock_unit_id);
+      const stockUnitLabel = r.stock_unit_label ?? su?.label ?? null;
+      const stockUnitCode = (r.stock_unit_code ?? su?.code ?? null) as any;
+
+      return {
+        ...r,
+        category_name: catName,
+        type_name: typeName,
+        supplier_name: supplierName,
+        stock_unit_label: stockUnitLabel,
+        stock_unit_code: stockUnitCode,
+      };
+    },
+    [categories, types, suppliers, stockUnits]
+  );
+
+  /* ================== FETCH ================== */
+
+  const fetchMasters = useCallback(async () => {
     setLoading(true);
     try {
       const res = await api.get("/masters", {
         params: {
-          search: q || undefined,
-          productTypeId: productTypeId || undefined,
+          search: q.trim() || undefined,
+          categoryId: categoryId || undefined,
+          typeId: typeId || undefined,
           supplierId: supplierId || undefined,
         },
       });
-      setRows(res.data || []);
+
+      const list: Row[] = res.data || [];
+      setRows(list.map(hydrateRow));
     } finally {
       setLoading(false);
     }
-  };
+  }, [q, categoryId, typeId, supplierId, hydrateRow]);
 
-  // ilk yüklemede: master listesi + lookuplar
+  // initial load
   useEffect(() => {
     (async () => {
       setLoading(true);
       try {
-        const [mastersRes, ptRes, supRes] = await Promise.all([
-          api.get("/masters"),
-          api.get("/lookups/product-types"),
+        const [catRes, supRes, suRes, mastersRes] = await Promise.all([
+          api.get("/lookups/categories"),
           api.get("/lookups/suppliers"),
+          api.get("/lookups/stock-units"),
+          api.get("/masters"),
         ]);
-        setRows(mastersRes.data || []);
-        setProductTypes(ptRes.data || []);
+
+        setCategories(catRes.data || []);
         setSuppliers(supRes.data || []);
+        setStockUnits(suRes.data || []);
+
+        const list: Row[] = mastersRes.data || [];
+        setRows(list.map((r) => r)); // hydrate aşağıdaki effect’te
       } finally {
         setLoading(false);
       }
     })();
   }, []);
 
-  /* ========== OPTIONS ========== */
+  // category change -> types load + type reset
+  useEffect(() => {
+    setTypeId("");
+    setTypes([]);
 
-  const productTypeOptions = useMemo(
+    const id = Number(categoryId);
+    if (!id) return;
+
+    api
+      .get(`/lookups/types/${id}`)
+      .then((r) => setTypes(r.data || []))
+      .catch(() => setTypes([]));
+  }, [categoryId]);
+
+  // lookups değişince mevcut rows’u hydrate et (join alanları backend’den gelmiyorsa)
+  useEffect(() => {
+    setRows((prev) => prev.map(hydrateRow));
+  }, [hydrateRow]);
+
+  /* ================== OPTIONS ================== */
+
+  const categoryOptions = useMemo(
     () => [
-      { value: "", label: "Ürün Türü (tümü)" },
-      ...productTypes.map((p) => ({
-        value: String(p.id),
-        label: p.name,
-      })),
+      { value: "", label: "Kategori (tümü)" },
+      ...categories.map((c) => ({ value: String(c.id), label: c.name })),
     ],
-    [productTypes]
+    [categories]
+  );
+
+  const typeOptions = useMemo(
+    () => [
+      { value: "", label: "Tür (tümü)" },
+      ...types.map((t) => ({ value: String(t.id), label: t.name })),
+    ],
+    [types]
   );
 
   const supplierOptions = useMemo(
     () => [
       { value: "", label: "Tedarikçi (tümü)" },
-      ...suppliers.map((s) => ({
-        value: String(s.id),
-        label: s.name,
-      })),
+      ...suppliers.map((s) => ({ value: String(s.id), label: s.name })),
     ],
     [suppliers]
   );
 
-  const formatInt = (val: any) => {
-    const n = Number(val);
-    if (!Number.isFinite(n)) return "0";
-    return n.toLocaleString("tr-TR", {
-      maximumFractionDigits: 0, // 🔹 tam sayı
-    });
-  };
-
-  /* ========== UI ========== */
+  /* ================== UI ================== */
 
   return (
     <div className="space-y-6">
-      <PageMeta
-        title="Tanım Listesi | TailAdmin"
-        description="Master tanımları"
-      />
+      <PageMeta title="Tanım Listesi | TailAdmin" description="Master tanımları" />
       <PageBreadcrumb pageTitle="Tanım Listesi" />
 
       {/* Filtreler */}
       <ComponentCard title="Filtreler">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr_1fr_auto]">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-[1.4fr_1fr_1fr_1fr_auto]">
           <Input
-            placeholder="Ara (Bimeks kodu, ürün adı, tedarikçi…)"
+            placeholder="Ara (tanım / kategori / tür / tedarikçi)"
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
+
           <Select
-            options={productTypeOptions}
-            value={productTypeId}
-            onChange={setProductTypeId}
-            placeholder="Ürün Türü"
+            options={categoryOptions}
+            value={categoryId}
+            onChange={setCategoryId}
+            placeholder="Kategori"
           />
+
+          <Select
+            options={typeOptions}
+            value={typeId}
+            onChange={setTypeId}
+            placeholder={categoryId ? "Tür" : "Önce kategori"}
+          />
+
           <Select
             options={supplierOptions}
             value={supplierId}
             onChange={setSupplierId}
             placeholder="Tedarikçi"
           />
+
           <div className="flex gap-2">
-            <Button variant="primary" onClick={fetchData}>
+            <Button variant="primary" onClick={fetchMasters}>
               Uygula
             </Button>
+
             <Button
               variant="outline"
-              onClick={() => {
+              onClick={async () => {
                 setQ("");
-                setProductTypeId("");
+                setCategoryId("");
+                setTypeId("");
                 setSupplierId("");
-                fetchData();
+                // state reset async; yine de net olsun diye küçük gecikme:
+                setTimeout(() => fetchMasters().catch(() => {}), 0);
               }}
             >
               Sıfırla
@@ -272,49 +282,19 @@ export default function MasterListPage() {
             <thead>
               <tr className="text-left">
                 <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
-                  Bimeks Kodu
+                  Ürün Tanımı
                 </th>
                 <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
-                  Bimeks Ürün Tanımı
+                  Kategori
                 </th>
                 <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
-                  Ölçü Birimi
-                </th>
-                <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
-                  Toplam Adet
-                </th>
-                <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
-                  Toplam Miktar
-                </th>
-                <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
-                  Ürün Türü
-                </th>
-                <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
-                  Taşıyıcı Türü
+                  Tür
                 </th>
                 <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
                   Tedarikçi
                 </th>
                 <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
-                  Tedarikçi Ürün Kodu
-                </th>
-                <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
-                  Taşıyıcı Renk
-                </th>
-                <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
-                  Liner Renk
-                </th>
-                <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
-                  Liner Türü
-                </th>
-                <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
-                  Yapışkan Türü
-                </th>
-                <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
-                  Kalınlık
-                </th>
-                <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
-                  Taşıyıcı Yoğunluk
+                  Ölçü Birimi
                 </th>
                 <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
                   Oluşturma
@@ -324,13 +304,11 @@ export default function MasterListPage() {
                 </th>
               </tr>
             </thead>
+
             <tbody>
               {loading ? (
                 <tr>
-                  <td
-                    className="px-4 py-6 text-gray-500 dark:text-gray-400"
-                    colSpan={14}
-                  >
+                  <td className="px-4 py-6 text-gray-500 dark:text-gray-400" colSpan={7}>
                     Yükleniyor…
                   </td>
                 </tr>
@@ -345,128 +323,44 @@ export default function MasterListPage() {
                         to={`/details/master/${r.id}`}
                         className="text-brand-600 hover:underline dark:text-brand-400"
                       >
-                        {r.bimeks_code ?? (
-                          <span className="text-gray-400 dark:text-gray-500">
-                            —
-                          </span>
-                        )}
+                        {r.display_label || `#${r.id}`}
                       </Link>
                     </td>
-                    <td className="px-4 py-3">
-                      {r.bimeks_product_name ?? (
-                        <span className="text-gray-400 dark:text-gray-500">
-                          —
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {unitLabel(r.stock_unit)}
-                    </td>
 
-                    <td className="px-4 py-3 text-right">
-                      {formatInt(r.total_count)}
-                    </td>
-
-                    <td className="px-4 py-3 text-right">
-                      {formatQty(r.total_qty)} {unitSuffix(r.stock_unit)}
+                    <td className="px-4 py-3">
+                      {r.category_name ?? <span className="text-gray-400 dark:text-gray-500">—</span>}
                     </td>
 
                     <td className="px-4 py-3">
-                      {r.product_type_name ?? (
-                        <span className="text-gray-400 dark:text-gray-500">
-                          —
-                        </span>
+                      {r.type_name ?? <span className="text-gray-400 dark:text-gray-500">—</span>}
+                    </td>
+
+                    <td className="px-4 py-3">
+                      {r.supplier_name ?? <span className="text-gray-400 dark:text-gray-500">—</span>}
+                    </td>
+
+                    <td className="px-4 py-3">
+                      {r.stock_unit_label ?? r.stock_unit_code ?? (
+                        <span className="text-gray-400 dark:text-gray-500">—</span>
                       )}
                     </td>
+
                     <td className="px-4 py-3">
-                      {r.carrier_type_name ?? (
-                        <span className="text-gray-400 dark:text-gray-500">
-                          —
-                        </span>
+                      {r.created_at ? new Date(r.created_at).toLocaleString() : (
+                        <span className="text-gray-400 dark:text-gray-500">—</span>
                       )}
                     </td>
+
                     <td className="px-4 py-3">
-                      {r.supplier_name ?? (
-                        <span className="text-gray-400 dark:text-gray-500">
-                          —
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {r.supplier_product_code ?? (
-                        <span className="text-gray-400 dark:text-gray-500">
-                          —
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {r.carrier_color_name ?? (
-                        <span className="text-gray-400 dark:text-gray-500">
-                          —
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {r.liner_color_name ?? (
-                        <span className="text-gray-400 dark:text-gray-500">
-                          —
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {r.liner_type_name ?? (
-                        <span className="text-gray-400 dark:text-gray-500">
-                          —
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {r.adhesive_type_name ?? (
-                        <span className="text-gray-400 dark:text-gray-500">
-                          —
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {r.thickness ?? (
-                        <span className="text-gray-400 dark:text-gray-500">
-                          —
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {r.carrier_density ?? (
-                        <span className="text-gray-400 dark:text-gray-500">
-                          —
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {r.created_at ? (
-                        new Date(r.created_at).toLocaleString()
-                      ) : (
-                        <span className="text-gray-400 dark:text-gray-500">
-                          —
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {r.updated_at ? (
-                        new Date(r.updated_at).toLocaleString()
-                      ) : (
-                        <span className="text-gray-400 dark:text-gray-500">
-                          —
-                        </span>
+                      {r.updated_at ? new Date(r.updated_at).toLocaleString() : (
+                        <span className="text-gray-400 dark:text-gray-500">—</span>
                       )}
                     </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td
-                    className="px-4 py-6 text-gray-500 dark:text-gray-400"
-                    colSpan={14}
-                  >
+                  <td className="px-4 py-6 text-gray-500 dark:text-gray-400" colSpan={7}>
                     Kayıt bulunamadı
                   </td>
                 </tr>

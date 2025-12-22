@@ -879,7 +879,7 @@ export default function StockExitPage() {
           <div className="mb-4 space-y-4">
             <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(160px,0.8fr)_minmax(220px,1fr)_minmax(220px,1fr)_auto]">
               <div>
-                <Label>Global Hedef</Label>
+                <Label>Hedef</Label>
                 <Select
                   options={[
                     { value: "", label: "Seçiniz", disabled: true },

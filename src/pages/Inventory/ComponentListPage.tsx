@@ -10,23 +10,24 @@ import api from "../../services/api";
 import { Link } from "react-router-dom";
 import * as XLSX from "xlsx";
 
-type StockUnit = "area" | "weight" | "length" | "unit" | string;
+/* ================== TYPES ================== */
+
+type StockUnitCode = "area" | "weight" | "length" | "unit";
 
 type Row = {
   id: number;
   barcode: string;
 
-  status?: string | null;
+  status?: string | null; // status_label || status_code (BE mapper)
 
-  warehouse?: { id: number; name: string };
-  location?: { id: number; name: string };
+  warehouse?: { id: number; name: string } | undefined;
+  location?: { id: number; name: string } | undefined;
 
   master?: {
     id: number;
-    bimeks_product_name?: string | null;
-    bimeks_code?: string | null;
-    stock_unit?: StockUnit | null; // area / weight / length / unit
-  };
+    display_label?: string | null;
+    stock_unit?: { id: number; code: StockUnitCode | null; label: string | null } | null;
+  } | undefined;
 
   width?: number | null;
   height?: number | null;
@@ -38,8 +39,8 @@ type Row = {
   created_by?: number | null;
   approved_by?: number | null;
 
-  created_by_user?: { id: number; username?: string; full_name?: string } | null;
-  approved_by_user?: { id: number; username?: string; full_name?: string } | null;
+  created_by_user?: { id: number; username?: string | null; full_name?: string | null } | null;
+  approved_by_user?: { id: number; username?: string | null; full_name?: string | null } | null;
 
   created_at?: string;
   updated_at?: string;
@@ -49,15 +50,52 @@ type Row = {
   invoice_no?: string | null;
 };
 
+type MasterOption = { id: number; display_label?: string | null };
+type WarehouseOption = { id: number; name: string };
+
+/* ================== HELPERS ================== */
+
 const dash = <span className="text-gray-400 dark:text-gray-500">—</span>;
 
 function normalizeUnit(u?: string | null): string {
   return (u || "").toString().trim().toLowerCase();
 }
 
+function unitLabelTR(code?: StockUnitCode | string | null) {
+  switch ((code || "").toString().toLowerCase()) {
+    case "unit":
+      return "Adet";
+    case "length":
+      return "Uzunluk";
+    case "weight":
+      return "Ağırlık";
+    case "area":
+      return "Alan";
+    default:
+      return "—";
+  }
+}
+
+function unitSuffix(code?: StockUnitCode | string | null) {
+  switch ((code || "").toString().toLowerCase()) {
+    case "area":
+      return "m²";
+    case "weight":
+      return "kg";
+    case "length":
+      return "m";
+    case "unit":
+      return "EA";
+    default:
+      return "";
+  }
+}
+
+/* ================== EXCEL EXPORT ================== */
+
 function exportToExcel(rows: Row[]) {
   const data = rows.map((r) => {
-    const unit = normalizeUnit(r.master?.stock_unit);
+    const unit = normalizeUnit(r.master?.stock_unit?.code || "");
 
     const en = unit === "area" ? r.width ?? "" : "";
     const boy = unit === "area" ? r.height ?? "" : "";
@@ -68,9 +106,8 @@ function exportToExcel(rows: Row[]) {
     return {
       Tip: "Komponent",
       Barkod: r.barcode,
-      "Tanım": r.master?.bimeks_product_name ?? "",
-      "Bimeks Kodu": r.master?.bimeks_code ?? "",
-      "Birim": unit || "",
+      Tanım: r.master?.display_label ?? "",
+      "Ölçü Birimi": unitLabelTR(unit),
       En: en,
       Boy: boy,
       Alan: alan,
@@ -80,7 +117,12 @@ function exportToExcel(rows: Row[]) {
       Lokasyon: r.location?.name ?? "",
       "Fatura No": r.invoice_no ?? "",
       Durum: r.status ?? "",
-      Güncelleme: r.updated_at ? new Date(r.updated_at).toLocaleString() : "",
+      "Oluşturan": r.created_by_user?.full_name ?? r.created_by_user?.username ?? (r.created_by ?? ""),
+      "Onaylayan": r.approved_by_user?.full_name ?? r.approved_by_user?.username ?? (r.approved_by ?? ""),
+      "Oluşturma": r.created_at ? new Date(r.created_at).toLocaleString() : "",
+      "Güncelleme": r.updated_at ? new Date(r.updated_at).toLocaleString() : "",
+      "Onay Tarihi": r.approved_at ? new Date(r.approved_at).toLocaleString() : "",
+      Notlar: r.notes ?? "",
     };
   });
 
@@ -90,33 +132,28 @@ function exportToExcel(rows: Row[]) {
   XLSX.writeFile(wb, "depo-stok.xlsx");
 }
 
-export default function ComponentListPage() {
+/* ================== PAGE ================== */
+
+export default function StockListPage() {
   const [rows, setRows] = useState<Row[]>([]);
+
   const [q, setQ] = useState("");
-  const [warehouse, setWarehouse] = useState("");
-  const [master, setMaster] = useState("");
+  const [warehouseId, setWarehouseId] = useState("");
+  const [masterId, setMasterId] = useState("");
   const [statusId, setStatusId] = useState("");
-  const unitLabel = (u?: string | null) => {
-  switch ((u || "").toLowerCase()) {
-    case "unit": return "Adet";
-    case "length": return "Uzunluk";
-    case "weight": return "Ağırlık";
-    case "area": return "Alan";
-    default: return "-";
-  }
-};
 
-
-  const [warehouses, setWarehouses] = useState<{ id: number; name: string }[]>([]);
-  const [masters, setMasters] = useState<{ id: number; bimeks_product_name?: string }[]>([]);
+  const [warehouses, setWarehouses] = useState<WarehouseOption[]>([]);
+  const [masters, setMasters] = useState<MasterOption[]>([]);
 
   const [loading, setLoading] = useState(false);
 
+  // lookups
   useEffect(() => {
     api.get("/lookups/warehouses").then((r) => setWarehouses(r.data || []));
   }, []);
 
   useEffect(() => {
+    // masters list endpoint: display_label var
     api.get("/masters").then((r) => setMasters(r.data || []));
   }, []);
 
@@ -126,8 +163,8 @@ export default function ComponentListPage() {
       const res = await api.get("/components", {
         params: {
           search: q || undefined,
-          warehouseId: warehouse || undefined,
-          masterId: master || undefined,
+          warehouseId: warehouseId || undefined,
+          masterId: masterId || undefined,
           statusId: statusId || undefined,
         },
       });
@@ -150,7 +187,7 @@ export default function ComponentListPage() {
   const masterOptions = useMemo(
     () => [
       { value: "", label: "Tanım (tümü)" },
-      ...masters.map((m) => ({ value: String(m.id), label: m.bimeks_product_name || `#${m.id}` })),
+      ...masters.map((m) => ({ value: String(m.id), label: m.display_label || `#${m.id}` })),
     ],
     [masters]
   );
@@ -170,34 +207,39 @@ export default function ComponentListPage() {
   );
 
   // ✅ stock_unit'e göre alanları göster
-  const renderWidth = (r: Row) => (normalizeUnit(r.master?.stock_unit) === "area" ? (r.width ?? dash) : dash);
-  const renderHeight = (r: Row) => (normalizeUnit(r.master?.stock_unit) === "area" ? (r.height ?? dash) : dash);
-  const renderArea = (r: Row) => (normalizeUnit(r.master?.stock_unit) === "area" ? (r.area ?? dash) : dash);
+  const unitCodeOf = (r: Row) => normalizeUnit(r.master?.stock_unit?.code || "");
 
-  const renderWeight = (r: Row) => (normalizeUnit(r.master?.stock_unit) === "weight" ? (r.weight ?? dash) : dash);
-  const renderLength = (r: Row) => (normalizeUnit(r.master?.stock_unit) === "length" ? (r.length ?? dash) : dash);
+  const renderWidth = (r: Row) => (unitCodeOf(r) === "area" ? (r.width ?? dash) : dash);
+  const renderHeight = (r: Row) => (unitCodeOf(r) === "area" ? (r.height ?? dash) : dash);
+  const renderArea = (r: Row) => (unitCodeOf(r) === "area" ? (r.area ?? dash) : dash);
+
+  const renderWeight = (r: Row) => (unitCodeOf(r) === "weight" ? (r.weight ?? dash) : dash);
+  const renderLength = (r: Row) => (unitCodeOf(r) === "length" ? (r.length ?? dash) : dash);
 
   const renderStatus = (r: Row) => r.status ?? dash;
 
   return (
     <div className="space-y-6">
-      <PageMeta title="Stok Listesi" description="Stok hareket ve mevcutlar" />
+      <PageMeta title="Stok Listesi" description="Komponent stok listesi" />
       <PageBreadcrumb pageTitle="Stok Listesi" />
 
       <ComponentCard title="Filtreler">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr_1fr_auto_auto]">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr_1fr_1fr_auto_auto]">
           <Input
-            placeholder="Ara (barkod, tanım, bimeks kodu…)"
+            placeholder="Ara (barkod, tanım, fatura no…)"
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
-          <Select options={warehouseOptions} value={warehouse} onChange={setWarehouse} placeholder="Depo" />
-          <Select options={masterOptions} value={master} onChange={setMaster} placeholder="Tanım" />
+
+          <Select options={warehouseOptions} value={warehouseId} onChange={setWarehouseId} placeholder="Depo" />
+          <Select options={masterOptions} value={masterId} onChange={setMasterId} placeholder="Tanım" />
           <Select options={statusOptions} value={statusId} onChange={setStatusId} placeholder="Durum" />
+
           <Button variant="primary" onClick={fetchData}>
             Uygula
           </Button>
-          <Button variant="primary" onClick={() => exportToExcel(rows)}>
+
+          <Button variant="outline" onClick={() => exportToExcel(rows)} disabled={!rows.length}>
             Excel’e Aktar
           </Button>
         </div>
@@ -211,7 +253,6 @@ export default function ComponentListPage() {
                 {[
                   "Barkod",
                   "Tanım",
-                  "Bimeks Kodu",
                   "Ölçü Birimi",
                   "En",
                   "Boy",
@@ -244,59 +285,81 @@ export default function ComponentListPage() {
                   </td>
                 </tr>
               ) : rows.length ? (
-                rows.map((r) => (
-                  <tr
-                    key={r.id}
-                    className="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-white/5"
-                  >
-                    <td className="px-4 py-3">
-                      <Link to={`/details/component/${r.id}`} className="text-brand-600 hover:underline dark:text-brand-400">
-                        {r.barcode}
-                      </Link>
-                    </td>
+                rows.map((r) => {
+                  const unitCode = (r.master?.stock_unit?.code || null) as StockUnitCode | null;
+                  const unitText = unitLabelTR(unitCode);
+                  const suffix = unitSuffix(unitCode);
 
-                    <td className="px-4 py-3 min-w-[240px]">
-                      {r.master?.bimeks_product_name ? (
-                        <Link to={`/details/component/${r.id}`} className="text-brand-600 hover:underline dark:text-brand-400">
-                          {r.master.bimeks_product_name}
+                  return (
+                    <tr
+                      key={r.id}
+                      className="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-white/5"
+                    >
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <Link
+                          to={`/details/component/${r.id}`}
+                          className="text-brand-600 hover:underline dark:text-brand-400"
+                        >
+                          {r.barcode}
                         </Link>
-                      ) : (
-                        dash
-                      )}
-                    </td>
+                      </td>
 
-                    <td className="px-4 py-3 whitespace-nowrap">{r.master?.bimeks_code ? r.master.bimeks_code : dash}</td>
-                    <td className="px-4 py-3 font-medium">{unitLabel(r.master?.stock_unit)}</td>
+                      <td className="px-4 py-3 min-w-[260px]">
+                        {r.master?.display_label ? (
+                          <Link
+                            to={`/details/component/${r.id}`}
+                            className="text-brand-600 hover:underline dark:text-brand-400"
+                            title={r.master.display_label}
+                          >
+                            {r.master.display_label}
+                          </Link>
+                        ) : (
+                          dash
+                        )}
+                      </td>
 
-                    <td className="px-4 py-3">{renderWidth(r)}</td>
-                    <td className="px-4 py-3">{renderHeight(r)}</td>
-                    <td className="px-4 py-3">{renderArea(r)}</td>
-                    <td className="px-4 py-3">{renderWeight(r)}</td>
-                    <td className="px-4 py-3">{renderLength(r)}</td>
+                      <td className="px-4 py-3 font-medium whitespace-nowrap">
+                        {unitText}
+                        {suffix ? <span className="text-gray-500 dark:text-gray-400"> ({suffix})</span> : null}
+                      </td>
 
-                    <td className="px-4 py-3">{renderStatus(r)}</td>
-                    <td className="px-4 py-3">{r.warehouse?.name ?? dash}</td>
-                    <td className="px-4 py-3">{r.location?.name ?? dash}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">{renderWidth(r)}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">{renderHeight(r)}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">{renderArea(r)}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">{renderWeight(r)}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">{renderLength(r)}</td>
 
-                    <td className="px-4 py-3">{r.invoice_no ?? dash}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">{renderStatus(r)}</td>
 
-                    <td className="px-4 py-3">
-                      {r.created_by_user?.full_name ?? r.created_by_user?.username ?? r.created_by ?? dash}
-                    </td>
+                      <td className="px-4 py-3 whitespace-nowrap">{r.warehouse?.name ?? dash}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">{r.location?.name ?? dash}</td>
 
-                    <td className="px-4 py-3">
-                      {r.approved_by_user?.full_name ?? r.approved_by_user?.username ?? r.approved_by ?? dash}
-                    </td>
+                      <td className="px-4 py-3 whitespace-nowrap">{r.invoice_no ?? dash}</td>
 
-                    <td className="px-4 py-3">{r.created_at ? new Date(r.created_at).toLocaleString() : dash}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {r.created_by_user?.full_name ?? r.created_by_user?.username ?? r.created_by ?? dash}
+                      </td>
 
-                    <td className="px-4 py-3">{r.updated_at ? new Date(r.updated_at).toLocaleString() : dash}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {r.approved_by_user?.full_name ?? r.approved_by_user?.username ?? r.approved_by ?? dash}
+                      </td>
 
-                    <td className="px-4 py-3">{r.approved_at ? new Date(r.approved_at).toLocaleString() : dash}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {r.created_at ? new Date(r.created_at).toLocaleString() : dash}
+                      </td>
 
-                    <td className="px-4 py-3">{r.notes ?? dash}</td>
-                  </tr>
-                ))
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {r.updated_at ? new Date(r.updated_at).toLocaleString() : dash}
+                      </td>
+
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {r.approved_at ? new Date(r.approved_at).toLocaleString() : dash}
+                      </td>
+
+                      <td className="px-4 py-3 min-w-[240px]">{r.notes ?? dash}</td>
+                    </tr>
+                  );
+                })
               ) : (
                 <tr>
                   <td className="px-4 py-6 text-gray-500 dark:text-gray-400" colSpan={18}>
@@ -307,6 +370,12 @@ export default function ComponentListPage() {
             </tbody>
           </table>
         </div>
+      </div>
+
+      {/* küçük dipnot */}
+      <div className="text-xs text-gray-500 dark:text-gray-400">
+        Not: En/Boy/Alan yalnızca “Alan” biriminde; Ağırlık yalnızca “Ağırlık” biriminde; Uzunluk yalnızca “Uzunluk”
+        biriminde görüntülenir.
       </div>
     </div>
   );

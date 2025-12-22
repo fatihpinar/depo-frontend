@@ -5,15 +5,7 @@ import { onPermsChange, arePermsReady, hasAny } from "../components/auth/permiss
 import { PackageCheck } from "lucide-react";
 import { Warehouse } from "lucide-react";
 import { Package } from "lucide-react";
-import { TableProperties } from "lucide-react";
-
-// Icon'lar
-import {
-  GridIcon,
-  ChevronDownIcon,
-  HorizontaLDots,
-  TaskIcon,
-} from "../icons";
+import { Ellipsis, BookA, ChartArea, Puzzle} from "lucide-react";
 
 // Sidebar state
 import { useSidebar } from "../context/SidebarContext";
@@ -49,27 +41,13 @@ function canSee(path?: string): boolean {
 
 /** ÜST KISIM (MENU) */
 const navItems: NavItem[] = [
-  { icon: <GridIcon />, name: "Dashboard", path: "/" },
-
+  { icon: <ChartArea />, name: "Dashboard", path: "/" },
   { icon: <Warehouse />, name: "Stok Girişi", path: "/inventory/stock-entry" },
   { icon: <PackageCheck />, name: "Stok Girişi Tamamlama", path: "/stock-receipts" },
   { icon: <Package />, name: "Stok Çıkışı", path: "/inventory/stock-exit" },
-  {
-    icon: <TableProperties />,
-    name: "Listeler",
-    subItems: [
-      { name: "Tanım Listesi", path: "/inventory/masters" },
-      { name: "Komponent Listesi", path: "/inventory/components" },
-      { name: "Ürün Listesi", path: "/inventory/products" },
-      { name: "Envanter Listesi", path: "/inventory/list" },
-    ],
-  },
-
-  
-  { icon: <TaskIcon />, name: "Üretim Tamamlama", path: "/production-receipts" },
-  { icon: <TaskIcon />, name: "Serigrafi Tamamlama", path: "/screenprint-receipts" },
+  { icon: <BookA />, name: "Tanım Listesi", path: "/inventory/masters" },
+  { icon: <Puzzle />, name: "Komponent Listesi", path: "/inventory/components" },  
 ];
-
 
 const AppSidebar: React.FC = () => {
   const { isExpanded, isMobileOpen, isHovered, setIsHovered } = useSidebar();
@@ -87,7 +65,6 @@ const AppSidebar: React.FC = () => {
       }
     };
   }, []);
-
 
   const [openSubmenu, setOpenSubmenu] = useState<{ type: "main"; index: number } | null>(null);
   const [subMenuHeight, setSubMenuHeight] = useState<Record<string, number>>({});
@@ -141,25 +118,6 @@ const AppSidebar: React.FC = () => {
                     : "menu-item-inactive"
                 } cursor-pointer ${!isExpanded && !isHovered ? "lg:justify-center" : "lg:justify-start"}`}
               >
-                <span
-                  className={`menu-item-icon-size ${
-                    openSubmenu?.type === "main" && openSubmenu?.index === index
-                      ? "menu-item-icon-active"
-                      : "menu-item-icon-inactive"
-                  }`}
-                >
-                  {nav.icon}
-                </span>
-                {(isExpanded || isHovered || isMobileOpen) && <span className="menu-item-text">{nav.name}</span>}
-                {(isExpanded || isHovered || isMobileOpen) && (
-                  <ChevronDownIcon
-                    className={`ml-auto w-5 h-5 transition-transform duration-200 ${
-                      openSubmenu?.type === "main" && openSubmenu?.index === index
-                        ? "rotate-180 text-brand-500"
-                        : ""
-                    }`}
-                  />
-                )}
               </button>
             ) : nav.path ? (
               <Link
@@ -250,7 +208,7 @@ const AppSidebar: React.FC = () => {
                   !isExpanded && !isHovered ? "lg:justify-center" : "justify-start"
                 }`}
               >
-                {isExpanded || isHovered || isMobileOpen ? "Menu" : <HorizontaLDots className="size-6" />}
+                {isExpanded || isHovered || isMobileOpen ? "Menu" : <Ellipsis  className="size-6" />}
               </h2>
               {renderMenuItems(navItems)}
             </div>

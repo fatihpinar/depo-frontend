@@ -118,7 +118,7 @@ export default function StockReceiptApprovalPage() {
       try {
         const [wh, pending] = await Promise.all([
           api.get("/lookups/warehouses"),
-          api.get("/approvals/pending", { params: { scope: "stock" } }),
+          api.get("/approvals/pending"),
         ]);
         setWarehouses(wh.data || []);
 
@@ -211,10 +211,8 @@ export default function StockReceiptApprovalPage() {
 
       setLoading(true);
       await api.post("/approvals/approve", {
-        scope: "stock",
         items: selectedRows.map((r) => ({
           id: r.id,
-          kind: r.kind,
           warehouse_id: r.warehouse_id,
           location_id: r.location_id,
           barcode: normalize(r.barcode),

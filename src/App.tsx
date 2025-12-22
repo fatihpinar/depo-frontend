@@ -10,7 +10,6 @@ import Home from "./pages/Dashboard/Home";
 
 // Details
 import MasterDetailPage from "./pages/Details/MasterDetail";
-import ProductDetailPage from "./pages/Details/ProductDetail";
 import ComponentDetailPage from "./pages/Details/ComponentDetail";
 import LegacyDetailsRedirect from "./components/common/LegacyDetailsRedirect";
 
@@ -18,13 +17,9 @@ import LegacyDetailsRedirect from "./components/common/LegacyDetailsRedirect";
 import StockEntryPage from "./pages/Inventory/StockEntryPage";
 import MasterListPage from "./pages/Inventory/MasterListPage";
 import ComponentListPage from "./pages/Inventory/ComponentListPage";
-import ProductListPage from "./pages/Inventory/ProductListPage";
 import StockExitPage from "./pages/Inventory/StockExitPage";
-import InventoryListPage from "./pages/Inventory/InventoryListPage";
 
 import StockReceiptApprovalPage from "./pages/Approvals/StockReceiptApprovalPage";
-import ScreenprintCompletionPage from "./pages/Approvals/ScreenprintCompletionPage";
-import ProductionCompletionPage from "./pages/Approvals/ProductionCompletionPage";
 
 import RequireAuth from "./components/auth/RequireAuth";
 import RequirePermission from "./components/auth/RequirePermission";
@@ -61,34 +56,15 @@ export default function App() {
             {/* Komponent listesi */}
             <Route element={<RequirePermission anyOf={["components.read"]} />}>
               <Route path="/inventory/components" element={<ComponentListPage />} />
-            </Route>
-
-            {/* Ürün listesi */}
-            <Route element={<RequirePermission anyOf={["products.read"]} />}>
-              <Route path="/inventory/products" element={<ProductListPage />} />
-            </Route>
-
-            {/* Envanter listesi (toplam stok görünümü) */}
-            <Route element={<RequirePermission anyOf={["inventory.read"]} />}>
-              <Route path="/inventory/list" element={<InventoryListPage />} />
-            </Route>
+            </Route>            
 
             {/* Approval sayfaları */}
             <Route element={<RequirePermission anyOf={["receipts.stock.approve"]} />}>
               <Route path="/stock-receipts" element={<StockReceiptApprovalPage />} />
             </Route>
 
-            <Route element={<RequirePermission anyOf={["receipts.production.approve"]} />}>
-              <Route path="/production-receipts" element={<ProductionCompletionPage />} />
-            </Route>
-
-            <Route element={<RequirePermission anyOf={["receipts.screenprint.approve"]} />}>
-              <Route path="/screenprint-receipts" element={<ScreenprintCompletionPage />} />
-            </Route>
-
             {/* Detay rotaları */}
             <Route path="/details/master/:id" element={<MasterDetailPage />} />
-            <Route path="/details/product/:id" element={<ProductDetailPage />} />
             <Route path="/details/component/:id" element={<ComponentDetailPage />} />
             <Route path="/details/:kind/:id" element={<LegacyDetailsRedirect />} />
 

@@ -1,7 +1,5 @@
 // src/pages/Stock/StockEntry.tsx
-
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { useLocation } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import api from "../../services/api";
 
 /* UI Components */
@@ -14,22 +12,32 @@ import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
 import Alert from "../../components/ui/alert/Alert";
 
-/* ============= TYPE DEFINITIONS ============= */
+/* ============= TYPES ============= */
 
-interface ProductType {
+type StockUnitCode = "area" | "weight" | "length" | "unit";
+
+interface Category {
   id: number;
   name: string;
 }
 
-interface CarrierType {
+interface TypeRow {
+  id: number;
+  name: string;
+  category_id: number;
+}
+
+interface Supplier {
   id: number;
   name: string;
 }
 
-interface SimpleLookup {
+interface StockUnit {
   id: number;
-  name: string;
-  display_code?: string;
+  code: StockUnitCode;
+  label: string;
+  is_active?: boolean;
+  sort_order?: number;
 }
 
 interface Warehouse {
@@ -43,28 +51,21 @@ interface Location {
   warehouse_id: number;
 }
 
-type StockUnit = "area" | "weight" | "length" | "unit";
-type ThicknessUnit = "um" | "m";
-
-
 interface Master {
   id: number;
   display_label: string;
-  default_unit?: "EA" | "M" | "KG";
-  product_type_id?: number;
-  carrier_type_id?: number;
-  bimeks_code?: string;
-  bimeks_product_name?: string;
+  category_id: number;
+  type_id: number;
+  supplier_id?: number | null;
+  stock_unit_id: number;
 
-  // length_unit yerine:
-  thickness_unit?: ThicknessUnit;
-  stock_unit?: StockUnit;
-
-  supplier_id?: number;
+  // join fields (opsiyonel)
+  category_name?: string;
+  type_name?: string;
   supplier_name?: string;
-  supplier_product_code?: string;
+  stock_unit_code?: StockUnitCode;
+  stock_unit_label?: string;
 }
-
 
 interface Row {
   id: string;
@@ -74,21 +75,15 @@ interface Row {
 
   width?: string;
   height?: string;
-  weight?: string;   // 🔹 yeni
-  length?: string;   // 🔹 yeni
+  weight?: string;
+  length?: string;
 
   warehouse_id?: string;
   location_id?: string;
   invoice_no?: string;
 
-  thickness_unit?: ThicknessUnit;
-  stock_unit?: StockUnit;  // 🔹 satırda master'ın stok birimi
-
-  bimeks_code?: string;
-  bimeks_product_name?: string;
+  stock_unit_code?: StockUnitCode; // master’dan
 }
-
-
 
 interface AlertState {
   variant: "success" | "error" | "warning" | "info";
@@ -102,7 +97,8 @@ interface GlobalSettings {
   location: string;
 }
 
-/* ============= UTILITIES ============= */
+/* ============= UTILS ============= */
+
 const uid = (): string => Math.random().toString(36).slice(2);
 
 const createSelectOption = (
@@ -115,182 +111,152 @@ const createSelectOption = (
   disabled,
 });
 
-const EMPTY_SELECT_OPTION = createSelectOption("", "Seçiniz", true);
+function useDebouncedValue<T>(value: T, delayMs: number) {
+  const [debounced, setDebounced] = useState<T>(value);
 
-/* ============= MASTER INLINE FORM COMPONENT ============= */
-interface MasterInlineFormProps {
-  onSaved: (saved: { id: number; display_label: string }) => void;
-  onCancel?: () => void;
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebounced(value), delayMs);
+    return () => window.clearTimeout(t);
+  }, [value, delayMs]);
+
+  return debounced;
 }
 
-function MasterInlineForm({ onSaved, onCancel }: MasterInlineFormProps) {
-  // Lookups
-  const [productTypes, setProductTypes] = useState<ProductType[]>([]);
-  const [suppliers, setSuppliers] = useState<SimpleLookup[]>([]);
-  const [carrierTypes, setCarrierTypes] = useState<SimpleLookup[]>([]);
-  const [carrierColors, setCarrierColors] = useState<SimpleLookup[]>([]);
-  const [linerColors, setLinerColors] = useState<SimpleLookup[]>([]);
-  const [linerTypes, setLinerTypes] = useState<SimpleLookup[]>([]);
-  const [adhesiveTypes, setAdhesiveTypes] = useState<SimpleLookup[]>([]);
-// Yeni (lengthUnit'i kalınlık birimi olarak kullanıyoruz)
-  const [lengthUnit, setLengthUnit] = useState<ThicknessUnit>("m");
+/* ============= MASTER INLINE FORM (SIRALI / TEKİL LOOKUP KAYIT) ============= */
 
-  // + yeni stok birimi state'i:
-  const [stockUnit, setStockUnit] = useState<StockUnit>("area");
+interface MasterInlineFormProps {
+  categories: Category[];
+  suppliers: Supplier[];
+  stockUnits: StockUnit[];
+  onCreated: (created: Master) => void;
 
-  const stockUnitOptions = [
-    createSelectOption("area", "Alan (m²)"),
-    createSelectOption("weight", "Ağırlık (kg)"),
-    createSelectOption("length", "Uzunluk (m)"),
-    createSelectOption("unit", "Adet (EA)"),  // 🔹 yeni
-  ];
+  // create lookup callbacks (page’de yazıyoruz)
+  onCreateCategory: (name: string) => Promise<Category>;
+  onCreateType: (name: string, categoryId: number) => Promise<TypeRow>;
+  onCreateSupplier: (name: string) => Promise<Supplier>;
+}
 
-  // Form values
-  const [productTypeId, setProductTypeId] = useState("");
-  const [supplierId, setSupplierId] = useState("");
-  const [supplierProductCode, setSupplierProductCode] = useState("");
-  const [bimeksProductName, setBimeksProductName] = useState("");
-  const [thickness, setThickness] = useState("");
-  const [carrierDensity, setCarrierDensity] = useState("");
-  const [carrierTypeId, setCarrierTypeId] = useState("");
-  const [carrierColorId, setCarrierColorId] = useState("");
-  const [linerColorId, setLinerColorId] = useState("");
-  const [linerTypeId, setLinerTypeId] = useState("");
-  const [adhesiveTypeId, setAdhesiveTypeId] = useState("");
-  const [bimeksCode, setBimeksCode] = useState("");
-
-  // Yeni kayıt flag + inputları
-  const [addingSupplier, setAddingSupplier] = useState(false);
-  const [newSupplierName, setNewSupplierName] = useState("");
-  const [newSupplierCode, setNewSupplierCode] = useState("");
-
-  const [addingCarrierType, setAddingCarrierType] = useState(false);
-  const [newCarrierTypeName, setNewCarrierTypeName] = useState("");
-  const [newCarrierTypeCode, setNewCarrierTypeCode] = useState("");
-
-  const [addingCarrierColor, setAddingCarrierColor] = useState(false);
-  const [newCarrierColorName, setNewCarrierColorName] = useState("");
-  const [newCarrierColorCode, setNewCarrierColorCode] = useState("");
-
-  const [addingLinerColor, setAddingLinerColor] = useState(false);
-  const [newLinerColorName, setNewLinerColorName] = useState("");
-  const [newLinerColorCode, setNewLinerColorCode] = useState("");
-
-  const [addingLinerType, setAddingLinerType] = useState(false);
-  const [newLinerTypeName, setNewLinerTypeName] = useState("");
-  const [newLinerTypeCode, setNewLinerTypeCode] = useState("");
-
-  const [addingAdhesiveType, setAddingAdhesiveType] = useState(false);
-  const [newAdhesiveTypeName, setNewAdhesiveTypeName] = useState("");
-  const [newAdhesiveTypeCode, setNewAdhesiveTypeCode] = useState("");
-
+function MasterInlineForm({
+  categories,
+  suppliers,
+  stockUnits,
+  onCreated,
+  onCreateCategory,
+  onCreateType,
+  onCreateSupplier,
+}: MasterInlineFormProps) {
   const [saving, setSaving] = useState(false);
 
-  // Initial data load
-  useEffect(() => {
-    (async () => {
-      try {
-        const [
-          productTypesRes,
-          suppliersRes,
-          carrierTypesRes,
-          carrierColorsRes,
-          linerColorsRes,
-          linerTypesRes,
-          adhesiveTypesRes,
-        ] = await Promise.all([
-          api.get("/lookups/product-types"),
-          api.get("/lookups/suppliers"),
-          api.get("/lookups/carrier-types"),
-          api.get("/lookups/carrier-colors"),
-          api.get("/lookups/liner-colors"),
-          api.get("/lookups/liner-types"),
-          api.get("/lookups/adhesive-types"),
-        ]);
+  // form
+  const [displayLabel, setDisplayLabel] = useState("");
+  const [categoryId, setCategoryId] = useState("");
+  const [typeId, setTypeId] = useState("");
+  const [supplierId, setSupplierId] = useState(""); // nullable
+  const [stockUnitId, setStockUnitId] = useState("");
 
-        setProductTypes(productTypesRes.data || []);
-        setSuppliers(suppliersRes.data || []);
-        setCarrierTypes(carrierTypesRes.data || []);
-        setCarrierColors(carrierColorsRes.data || []);
-        setLinerColors(linerColorsRes.data || []);
-        setLinerTypes(linerTypesRes.data || []);
-        setAdhesiveTypes(adhesiveTypesRes.data || []);
-      } catch (err) {
-        console.error("Master lookups load error:", err);
-        alert("Tanım için gerekli listeler yüklenirken bir hata oluştu.");
-      }
-    })();
-  }, []);
+  // types list depends on category
+  const [types, setTypes] = useState<TypeRow[]>([]);
+  const [typesLoading, setTypesLoading] = useState(false);
 
-  // ----- OPTIONS -----
+  // “+ new”
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+
+  const [addingType, setAddingType] = useState(false);
+  const [newTypeName, setNewTypeName] = useState("");
+
+  const [addingSupplier, setAddingSupplier] = useState(false);
+  const [newSupplierName, setNewSupplierName] = useState("");
+
+  const categoryOptions = useMemo(
+    () => [
+      createSelectOption("", "Seçiniz", true),
+      ...categories.map((c) => createSelectOption(c.id, c.name)),
+      createSelectOption("new", "+ Yeni Kategori Ekle"),
+    ],
+    [categories]
+  );
+
+  const typeOptions = useMemo(
+    () => [
+      createSelectOption("", "Seçiniz", true),
+      ...types.map((t) => createSelectOption(t.id, t.name)),
+      createSelectOption("new", "+ Yeni Tür Ekle"),
+    ],
+    [types]
+  );
+
   const supplierOptions = useMemo(
     () => [
-      EMPTY_SELECT_OPTION,
+      createSelectOption("", "Seçiniz"),
       ...suppliers.map((s) => createSelectOption(s.id, s.name)),
       createSelectOption("new", "+ Yeni Tedarikçi Ekle"),
     ],
     [suppliers]
   );
 
-  const productTypeOptions = useMemo(
-    () => [
-      EMPTY_SELECT_OPTION,
-      ...productTypes.map((p) => createSelectOption(p.id, p.name)),
-    ],
-    [productTypes]
-  );
+  const stockUnitOptions = useMemo(() => {
+    const list = [...stockUnits]
+      .filter((x) => x.is_active !== false)
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+      .map((su) => createSelectOption(su.id, su.label));
 
-  const carrierTypeOptions = useMemo(
-    () => [
-      EMPTY_SELECT_OPTION,
-      ...carrierTypes.map((t) => createSelectOption(t.id, t.name)),
-      createSelectOption("new", "+ Yeni Taşıyıcı Türü Ekle"),
-    ],
-    [carrierTypes]
-  );
+    return [createSelectOption("", "Seçiniz", true), ...list];
+  }, [stockUnits]);
 
-  const carrierColorOptions = useMemo(
-    () => [
-      EMPTY_SELECT_OPTION,
-      ...carrierColors.map((c) => createSelectOption(c.id, c.name)),
-      createSelectOption("new", "+ Yeni Taşıyıcı Renk Ekle"),
-    ],
-    [carrierColors]
-  );
+  const loadTypes = useCallback(async (catId: number) => {
+    setTypesLoading(true);
+    try {
+      const res = await api.get(`/lookups/types/${catId}`);
+      setTypes(res.data || []);
+    } catch (e) {
+      console.error(e);
+      setTypes([]);
+    } finally {
+      setTypesLoading(false);
+    }
+  }, []);
 
-  const linerColorOptions = useMemo(
-    () => [
-      EMPTY_SELECT_OPTION,
-      ...linerColors.map((c) => createSelectOption(c.id, c.name)),
-      createSelectOption("new", "+ Yeni Liner Renk Ekle"),
-    ],
-    [linerColors]
-  );
+  useEffect(() => {
+    // category değişince type reset + types yükle
+    setTypeId("");
+    setAddingType(false);
+    setNewTypeName("");
+    setTypes([]);
 
-  const linerTypeOptions = useMemo(
-    () => [
-      EMPTY_SELECT_OPTION,
-      ...linerTypes.map((t) => createSelectOption(t.id, t.name)),
-      createSelectOption("new", "+ Yeni Liner Türü Ekle"),
-    ],
-    [linerTypes]
-  );
+    const id = Number(categoryId);
+    if (!id) return;
+    loadTypes(id);
+  }, [categoryId, loadTypes]);
 
-  const adhesiveTypeOptions = useMemo(
-    () => [
-      EMPTY_SELECT_OPTION,
-      ...adhesiveTypes.map((t) => createSelectOption(t.id, t.name)),
-      createSelectOption("new", "+ Yeni Yapışkan Türü Ekle"),
-    ],
-    [adhesiveTypes]
-  );
+  const handleCategoryChange = (val: string) => {
+    if (val === "new") {
+      setAddingCategory(true);
+      setCategoryId("");
+      setTypeId("");
+      setTypes([]);
+    } else {
+      setAddingCategory(false);
+      setNewCategoryName("");
+      setCategoryId(val);
+    }
+  };
 
-  const thicknessUnitOptions = [
-    createSelectOption("um", "Mikron (µm)"),
-    createSelectOption("m", "Metre (m)"),
-  ];
+  const handleTypeChange = (val: string) => {
+    if (val === "new") {
+      if (!categoryId) {
+        alert("Önce kategori seçiniz.");
+        return;
+      }
+      setAddingType(true);
+      setTypeId("");
+    } else {
+      setAddingType(false);
+      setNewTypeName("");
+      setTypeId(val);
+    }
+  };
 
-  // ----- ON CHANGE HANDLERS -----
   const handleSupplierChange = (val: string) => {
     if (val === "new") {
       setAddingSupplier(true);
@@ -298,119 +264,113 @@ function MasterInlineForm({ onSaved, onCancel }: MasterInlineFormProps) {
     } else {
       setAddingSupplier(false);
       setNewSupplierName("");
-      setNewSupplierCode("");
       setSupplierId(val);
     }
   };
 
-  const handleCarrierTypeChange = (val: string) => {
-    if (val === "new") {
-      setAddingCarrierType(true);
-      setCarrierTypeId("");
-    } else {
-      setAddingCarrierType(false);
-      setNewCarrierTypeName("");
-      setNewCarrierTypeCode("");
-      setCarrierTypeId(val);
+  // ✅ Dropdown içinden tekil kayıt: Kaydet & Seç
+  const handleSaveCategoryOnly = useCallback(async () => {
+    const name = newCategoryName.trim();
+    if (!name) {
+      alert("Kategori adı zorunlu.");
+      return;
     }
-  };
 
-  const handleCarrierColorChange = (val: string) => {
-    if (val === "new") {
-      setAddingCarrierColor(true);
-      setCarrierColorId("");
-    } else {
-      setAddingCarrierColor(false);
-      setNewCarrierColorName("");
-      setNewCarrierColorCode("");
-      setCarrierColorId(val);
+    try {
+      const created = await onCreateCategory(name);
+
+      // otomatik seç + type reset + types yükle
+      setCategoryId(String(created.id));
+      setAddingCategory(false);
+      setNewCategoryName("");
+
+      setTypeId("");
+      setTypes([]);
+      await loadTypes(created.id);
+    } catch (e: any) {
+      console.error(e);
+      const msg = e?.response?.data?.message || "Kategori kaydedilemedi.";
+      alert(msg);
     }
-  };
+  }, [newCategoryName, onCreateCategory, loadTypes]);
 
-  const handleLinerColorChange = (val: string) => {
-    if (val === "new") {
-      setAddingLinerColor(true);
-      setLinerColorId("");
-    } else {
-      setAddingLinerColor(false);
-      setNewLinerColorName("");
-      setNewLinerColorCode("");
-      setLinerColorId(val);
+  const handleSaveTypeOnly = useCallback(async () => {
+    const catId = Number(categoryId);
+    if (!catId) {
+      alert("Önce kategori seçiniz.");
+      return;
     }
-  };
 
-  const handleLinerTypeChange = (val: string) => {
-    if (val === "new") {
-      setAddingLinerType(true);
-      setLinerTypeId("");
-    } else {
-      setAddingLinerType(false);
-      setNewLinerTypeName("");
-      setNewLinerTypeCode("");
-      setLinerTypeId(val);
+    const name = newTypeName.trim();
+    if (!name) {
+      alert("Tür adı zorunlu.");
+      return;
     }
-  };
 
-  const handleAdhesiveTypeChange = (val: string) => {
-    if (val === "new") {
-      setAddingAdhesiveType(true);
-      setAdhesiveTypeId("");
-    } else {
-      setAddingAdhesiveType(false);
-      setNewAdhesiveTypeName("");
-      setNewAdhesiveTypeCode("");
-      setAdhesiveTypeId(val);
+    try {
+      const created = await onCreateType(name, catId);
+
+      // listede görünsün + otomatik seç
+      setTypes((prev) => {
+        const already = prev.some((x) => x.id === created.id);
+        return already ? prev : [...prev, created];
+      });
+      setTypeId(String(created.id));
+      setAddingType(false);
+      setNewTypeName("");
+    } catch (e: any) {
+      console.error(e);
+      const msg = e?.response?.data?.message || "Tür kaydedilemedi.";
+      alert(msg);
     }
-  };
+  }, [categoryId, newTypeName, onCreateType]);
 
-  // ----- VALIDATION -----
+  const handleSaveSupplierOnly = useCallback(async () => {
+    const name = newSupplierName.trim();
+    if (!name) {
+      alert("Tedarikçi adı zorunlu.");
+      return;
+    }
+
+    try {
+      const created = await onCreateSupplier(name);
+      setSupplierId(String(created.id));
+      setAddingSupplier(false);
+      setNewSupplierName("");
+    } catch (e: any) {
+      console.error(e);
+      const msg = e?.response?.data?.message || "Tedarikçi kaydedilemedi.";
+      alert(msg);
+    }
+  }, [newSupplierName, onCreateSupplier]);
+
   const validate = (): string[] => {
     const missing: string[] = [];
-
-    if (!productTypeId) missing.push("Ürün Türü");
-    if (!addingSupplier && !supplierId) missing.push("Tedarikçi");
-    if (!addingCarrierType && !carrierTypeId) missing.push("Taşıyıcı Türü");
-    if (!addingCarrierColor && !carrierColorId) missing.push("Taşıyıcı Renk");
-    if (!addingLinerColor && !linerColorId) missing.push("Liner Renk");
-    if (!addingLinerType && !linerTypeId) missing.push("Liner Türü");
-    if (!addingAdhesiveType && !adhesiveTypeId) missing.push("Yapışkan Türü");
-    if (!stockUnit) missing.push("Stok Birimi");
-    if (!lengthUnit) missing.push("Kalınlık Birimi");
-
-
-    if (!bimeksProductName.trim()) missing.push("Bimeks Ürün Tanımı");
-    if (!supplierProductCode.trim()) missing.push("Tedarikçi Ürün Kodu");
-
-    if (addingSupplier) {
-      if (!newSupplierName.trim()) missing.push("Yeni Tedarikçi Adı");
-      if (!newSupplierCode.trim()) missing.push("Yeni Tedarikçi Kodu");
-    }
-    if (addingCarrierType) {
-      if (!newCarrierTypeName.trim()) missing.push("Yeni Taşıyıcı Türü Adı");
-      if (!newCarrierTypeCode.trim()) missing.push("Yeni Taşıyıcı Türü Kodu");
-    }
-    if (addingCarrierColor) {
-      if (!newCarrierColorName.trim()) missing.push("Yeni Taşıyıcı Renk Adı");
-      if (!newCarrierColorCode.trim()) missing.push("Yeni Taşıyıcı Renk Kodu");
-    }
-    if (addingLinerColor) {
-      if (!newLinerColorName.trim()) missing.push("Yeni Liner Renk Adı");
-      if (!newLinerColorCode.trim()) missing.push("Yeni Liner Renk Kodu");
-    }
-    if (addingLinerType) {
-      if (!newLinerTypeName.trim()) missing.push("Yeni Liner Türü Adı");
-      if (!newLinerTypeCode.trim()) missing.push("Yeni Liner Türü Kodu");
-    }
-    if (addingAdhesiveType) {
-      if (!newAdhesiveTypeName.trim()) missing.push("Yeni Yapışkan Türü Adı");
-      if (!newAdhesiveTypeCode.trim()) missing.push("Yeni Yapışkan Türü Kodu");
-    }
-
+    if (!displayLabel.trim()) missing.push("Ürün Tanımı");
+    if (!categoryId) missing.push("Kategori");
+    if (!typeId) missing.push("Tür");
+    if (!stockUnitId) missing.push("Ölçü Birimi");
     return missing;
   };
 
-  // ----- SAVE -----
-  const handleSave = async () => {
+  const resetForm = () => {
+    setDisplayLabel("");
+    setCategoryId("");
+    setTypeId("");
+    setSupplierId("");
+    setStockUnitId("");
+    setTypes([]);
+
+    setAddingCategory(false);
+    setNewCategoryName("");
+    setAddingType(false);
+    setNewTypeName("");
+    setAddingSupplier(false);
+    setNewSupplierName("");
+  };
+
+  // ✅ Master kaydı artık lookup yaratmaz; sadece seçili id’lerle kaydeder.
+  const handleSaveMaster = async () => {
     const missing = validate();
     if (missing.length) {
       alert("Zorunlu alan(lar) eksik:\n- " + missing.join("\n- "));
@@ -419,212 +379,24 @@ function MasterInlineForm({ onSaved, onCancel }: MasterInlineFormProps) {
 
     setSaving(true);
     try {
-      let finalSupplierId: number | null = supplierId ? Number(supplierId) : null;
-
-      if (addingSupplier) {
-        const name = newSupplierName.trim();
-        const code = newSupplierCode.trim();
-
-        const exists = suppliers.find(
-          (s) => s.name.toLowerCase() === name.toLowerCase()
-        );
-        if (exists) {
-          finalSupplierId = exists.id;
-        } else {
-          const supRes = await api.post("/lookups/suppliers", {
-            name,
-            display_code: code,
-          });
-          finalSupplierId = supRes.data.id;
-          setSuppliers((prev) => [...prev, supRes.data]);
-        }
-      }
-
-      let finalCarrierTypeId: number | null = carrierTypeId
-        ? Number(carrierTypeId)
-        : null;
-      if (addingCarrierType) {
-        const name = newCarrierTypeName.trim();
-        const code = newCarrierTypeCode.trim();
-        const exists = carrierTypes.find(
-          (t) => t.name.toLowerCase() === name.toLowerCase()
-        );
-        if (exists) {
-          finalCarrierTypeId = exists.id;
-        } else {
-          const res = await api.post("/lookups/carrier-types", {
-            name,
-            display_code: code,
-          });
-          finalCarrierTypeId = res.data.id;
-          setCarrierTypes((prev) => [...prev, res.data]);
-        }
-      }
-
-      let finalCarrierColorId: number | null = carrierColorId
-        ? Number(carrierColorId)
-        : null;
-      if (addingCarrierColor) {
-        const name = newCarrierColorName.trim();
-        const code = newCarrierColorCode.trim();
-        const exists = carrierColors.find(
-          (c) => c.name.toLowerCase() === name.toLowerCase()
-        );
-        if (exists) {
-          finalCarrierColorId = exists.id;
-        } else {
-          const res = await api.post("/lookups/carrier-colors", {
-            name,
-            display_code: code,
-          });
-          finalCarrierColorId = res.data.id;
-          setCarrierColors((prev) => [...prev, res.data]);
-        }
-      }
-
-      let finalLinerColorId: number | null = linerColorId
-        ? Number(linerColorId)
-        : null;
-      if (addingLinerColor) {
-        const name = newLinerColorName.trim();
-        const code = newLinerColorCode.trim();
-        const exists = linerColors.find(
-          (c) => c.name.toLowerCase() === name.toLowerCase()
-        );
-        if (exists) {
-          finalLinerColorId = exists.id;
-        } else {
-          const res = await api.post("/lookups/liner-colors", {
-            name,
-            display_code: code,
-          });
-          finalLinerColorId = res.data.id;
-          setLinerColors((prev) => [...prev, res.data]);
-        }
-      }
-
-      let finalLinerTypeId: number | null = linerTypeId
-        ? Number(linerTypeId)
-        : null;
-      if (addingLinerType) {
-        const name = newLinerTypeName.trim();
-        const code = newLinerTypeCode.trim();
-        const exists = linerTypes.find(
-          (t) => t.name.toLowerCase() === name.toLowerCase()
-        );
-        if (exists) {
-          finalLinerTypeId = exists.id;
-        } else {
-          const res = await api.post("/lookups/liner-types", {
-            name,
-            display_code: code,
-          });
-          finalLinerTypeId = res.data.id;
-          setLinerTypes((prev) => [...prev, res.data]);
-        }
-      }
-
-      let finalAdhesiveTypeId: number | null = adhesiveTypeId
-        ? Number(adhesiveTypeId)
-        : null;
-      if (addingAdhesiveType) {
-        const name = newAdhesiveTypeName.trim();
-        const code = newAdhesiveTypeCode.trim();
-        const exists = adhesiveTypes.find(
-          (t) => t.name.toLowerCase() === name.toLowerCase()
-        );
-        if (exists) {
-          finalAdhesiveTypeId = exists.id;
-        } else {
-          const res = await api.post("/lookups/adhesive-types", {
-            name,
-            display_code: code,
-          });
-          finalAdhesiveTypeId = res.data.id;
-          setAdhesiveTypes((prev) => [...prev, res.data]);
-        }
-      }
-
-      const payload: Record<string, any> = {
-        product_type_id: Number(productTypeId),
-        supplier_id: finalSupplierId,
-        supplier_product_code: supplierProductCode.trim(),
-        bimeks_product_name: bimeksProductName.trim(),
-        carrier_type_id: finalCarrierTypeId,
-        carrier_color_id: finalCarrierColorId,
-        liner_color_id: finalLinerColorId,
-        liner_type_id: finalLinerTypeId,
-        adhesive_type_id: finalAdhesiveTypeId,
-
-        // Kalınlık + birimi
-        thickness: thickness ? Number(thickness) : null,
-        thickness_unit: lengthUnit,        // yeni alan
-
-        // Stok birimi (alan / ağırlık)
-        stock_unit: stockUnit,
-
-        carrier_density: carrierDensity ? Number(carrierDensity) : null,
+      const payload = {
+        display_label: displayLabel.trim(),
+        category_id: Number(categoryId),
+        type_id: Number(typeId),
+        supplier_id: supplierId ? Number(supplierId) : null,
+        stock_unit_id: Number(stockUnitId),
       };
 
       const res = await api.post("/masters", payload);
       const created: Master = res.data;
 
-      setBimeksCode(created.bimeks_code || "");
-
-      const display =
-        created.display_label ||
-        `${created.bimeks_code ?? ""} - ${created.bimeks_product_name ?? bimeksProductName}`.trim();
-
       alert("Tanım kaydedildi.");
-
-      onSaved({
-        id: created.id,
-        display_label: display,
-      });
-
-      // Form reset
-      setProductTypeId("");
-      setSupplierId("");
-      setSupplierProductCode("");
-      setBimeksProductName("");
-      setThickness("");
-      setCarrierDensity("");
-      setCarrierTypeId("");
-      setCarrierColorId("");
-      setLinerColorId("");
-      setLinerTypeId("");
-      setAdhesiveTypeId("");
-      setAddingSupplier(false);
-      setNewSupplierName("");
-      setNewSupplierCode("");
-      setAddingCarrierType(false);
-      setNewCarrierTypeName("");
-      setNewCarrierTypeCode("");
-      setAddingCarrierColor(false);
-      setNewCarrierColorName("");
-      setNewCarrierColorCode("");
-      setAddingLinerColor(false);
-      setNewLinerColorName("");
-      setNewLinerColorCode("");
-      setAddingLinerType(false);
-      setNewLinerTypeName("");
-      setNewLinerTypeCode("");
-      setAddingAdhesiveType(false);
-      setNewAdhesiveTypeName("");
-      setNewAdhesiveTypeCode("");
-
-      onCancel?.();
-    } catch (err: any) {
-      console.error("Master kaydetme hatası:", err);
-      const { status, data } = err?.response || {};
-
-      if (status === 409 && (data?.code === "duplicate_name" || data?.error === "duplicate_name")) {
-        alert("Aynı özelliklere sahip bir Bimeks tanımı zaten mevcut.");
-      } else if (status === 400) {
-        alert(data?.message || "Zorunlu alanlar eksik veya hatalı.");
-      } else {
-        alert("Beklenmeyen bir hata oluştu.");
-      }
+      onCreated(created);
+      resetForm();
+    } catch (e: any) {
+      console.error(e);
+      const msg = e?.response?.data?.message || "Tanım kaydedilemedi.";
+      alert(msg);
     } finally {
       setSaving(false);
     }
@@ -632,48 +404,161 @@ function MasterInlineForm({ onSaved, onCancel }: MasterInlineFormProps) {
 
   return (
     <div className="space-y-4">
+      <div>
+        <Label>
+          Ürün Tanımı <span className="text-red-500">*</span>
+        </Label>
+        <Input
+          type="text"
+          value={displayLabel}
+          onChange={(e) => setDisplayLabel(e.target.value)}
+          placeholder="Örn: Çift taraflı bant 1mm"
+        />
+      </div>
+
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div>
           <Label>
-            Ürün Türü <span className="text-red-500">*</span>
+            Kategori <span className="text-red-500">*</span>
           </Label>
           <Select
-            options={productTypeOptions}
-            value={productTypeId}
-            onChange={setProductTypeId}
+            options={categoryOptions}
+            value={categoryId}
+            onChange={handleCategoryChange}
             placeholder="Seçiniz"
           />
+
+          {addingCategory && (
+            <div className="mt-2 space-y-2">
+              <div>
+                <Label>Yeni Kategori Adı</Label>
+                <Input
+                  type="text"
+                  value={newCategoryName}
+                  onChange={(e) => setNewCategoryName(e.target.value)}
+                  placeholder="Örn: Bant"
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <Button
+                  variant="primary"
+                  onClick={handleSaveCategoryOnly}
+                  disabled={!newCategoryName.trim()}
+                >
+                  Kategori Kaydet
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setAddingCategory(false);
+                    setNewCategoryName("");
+                  }}
+                >
+                  İptal
+                </Button>
+              </div>
+
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                Not: Kategori kaydedilince otomatik seçilir. Sonra Tür ekleyebilirsin.
+              </div>
+            </div>
+          )}
         </div>
 
         <div>
           <Label>
-            Tedarikçi <span className="text-red-500">*</span>
+            Tür <span className="text-red-500">*</span>
           </Label>
+          <Select
+            options={typeOptions}
+            value={typeId}
+            onChange={handleTypeChange}
+            placeholder={
+              !categoryId
+                ? "Önce kategori seçiniz"
+                : typesLoading
+                ? "Yükleniyor..."
+                : "Seçiniz"
+            }
+          />
+
+          {addingType && (
+            <div className="mt-2 space-y-2">
+              <div>
+                <Label>Yeni Tür Adı</Label>
+                <Input
+                  type="text"
+                  value={newTypeName}
+                  onChange={(e) => setNewTypeName(e.target.value)}
+                  placeholder="Örn: Çift Taraflı Köpük Bant"
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <Button
+                  variant="primary"
+                  onClick={handleSaveTypeOnly}
+                  disabled={!newTypeName.trim() || !categoryId}
+                >
+                  Tür Kaydet
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setAddingType(false);
+                    setNewTypeName("");
+                  }}
+                >
+                  İptal
+                </Button>
+              </div>
+
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                Not: Tür eklemek için kategori seçili olmalı.
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div>
+          <Label>Tedarikçi</Label>
           <Select
             options={supplierOptions}
             value={supplierId}
             onChange={handleSupplierChange}
             placeholder="Seçiniz"
           />
+
           {addingSupplier && (
-            <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
+            <div className="mt-2 space-y-2">
               <div>
                 <Label>Yeni Tedarikçi Adı</Label>
                 <Input
                   type="text"
                   value={newSupplierName}
                   onChange={(e) => setNewSupplierName(e.target.value)}
-                  placeholder="Örn: ACME A.Ş."
+                  placeholder="Örn: 3M"
                 />
               </div>
-              <div>
-                <Label>Kısaltma / Kod</Label>
-                <Input
-                  type="text"
-                  value={newSupplierCode}
-                  onChange={(e) => setNewSupplierCode(e.target.value)}
-                  placeholder="Örn: AC"
-                />
+
+              <div className="flex gap-2">
+                <Button
+                  variant="primary"
+                  onClick={handleSaveSupplierOnly}
+                  disabled={!newSupplierName.trim()}
+                >
+                  Tedarikçi Kaydet
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setAddingSupplier(false);
+                    setNewSupplierName("");
+                  }}
+                >
+                  İptal
+                </Button>
               </div>
             </div>
           )}
@@ -681,274 +566,32 @@ function MasterInlineForm({ onSaved, onCancel }: MasterInlineFormProps) {
 
         <div>
           <Label>
-            Taşıyıcı Türü <span className="text-red-500">*</span>
-          </Label>
-          <Select
-            options={carrierTypeOptions}
-            value={carrierTypeId}
-            onChange={handleCarrierTypeChange}
-            placeholder="Seçiniz"
-          />
-          {addingCarrierType && (
-            <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
-              <div>
-                <Label>Yeni Taşıyıcı Türü Adı</Label>
-                <Input
-                  type="text"
-                  value={newCarrierTypeName}
-                  onChange={(e) => setNewCarrierTypeName(e.target.value)}
-                  placeholder="Örn: PE Köpük"
-                />
-              </div>
-              <div>
-                <Label>Kısaltma / Kod</Label>
-                <Input
-                  type="text"
-                  value={newCarrierTypeCode}
-                  onChange={(e) => setNewCarrierTypeCode(e.target.value)}
-                  placeholder="Örn: CT1"
-                />
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div>
-          <Label>
-            Taşıyıcı Renk <span className="text-red-500">*</span>
-          </Label>
-          <Select
-            options={carrierColorOptions}
-            value={carrierColorId}
-            onChange={handleCarrierColorChange}
-            placeholder="Seçiniz"
-          />
-          {addingCarrierColor && (
-            <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
-              <div>
-                <Label>Yeni Taşıyıcı Renk Adı</Label>
-                <Input
-                  type="text"
-                  value={newCarrierColorName}
-                  onChange={(e) => setNewCarrierColorName(e.target.value)}
-                  placeholder="Örn: Beyaz"
-                />
-              </div>
-              <div>
-                <Label>Kısaltma / Kod</Label>
-                <Input
-                  type="text"
-                  value={newCarrierColorCode}
-                  onChange={(e) => setNewCarrierColorCode(e.target.value)}
-                  placeholder="Örn: WH"
-                />
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div>
-          <Label>
-            Liner Renk <span className="text-red-500">*</span>
-          </Label>
-          <Select
-            options={linerColorOptions}
-            value={linerColorId}
-            onChange={handleLinerColorChange}
-            placeholder="Seçiniz"
-          />
-          {addingLinerColor && (
-            <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
-              <div>
-                <Label>Yeni Liner Renk Adı</Label>
-                <Input
-                  type="text"
-                  value={newLinerColorName}
-                  onChange={(e) => setNewLinerColorName(e.target.value)}
-                  placeholder="Örn: Sarı"
-                />
-              </div>
-              <div>
-                <Label>Kısaltma / Kod</Label>
-                <Input
-                  type="text"
-                  value={newLinerColorCode}
-                  onChange={(e) => setNewLinerColorCode(e.target.value)}
-                  placeholder="Örn: YL"
-                />
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div>
-          <Label>
-            Liner Türü <span className="text-red-500">*</span>
-          </Label>
-          <Select
-            options={linerTypeOptions}
-            value={linerTypeId}
-            onChange={handleLinerTypeChange}
-            placeholder="Seçiniz"
-          />
-          {addingLinerType && (
-            <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
-              <div>
-                <Label>Yeni Liner Türü Adı</Label>
-                <Input
-                  type="text"
-                  value={newLinerTypeName}
-                  onChange={(e) => setNewLinerTypeName(e.target.value)}
-                  placeholder="Örn: Sarı Kağıt"
-                />
-              </div>
-              <div>
-                <Label>Kısaltma / Kod</Label>
-                <Input
-                  type="text"
-                  value={newLinerTypeCode}
-                  onChange={(e) => setNewLinerTypeCode(e.target.value)}
-                  placeholder="Örn: LT1"
-                />
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div>
-          <Label>
-            Yapışkan Türü <span className="text-red-500">*</span>
-          </Label>
-          <Select
-            options={adhesiveTypeOptions}
-            value={adhesiveTypeId}
-            onChange={handleAdhesiveTypeChange}
-            placeholder="Seçiniz"
-          />
-          {addingAdhesiveType && (
-            <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
-              <div>
-                <Label>Yeni Yapışkan Türü Adı</Label>
-                <Input
-                  type="text"
-                  value={newAdhesiveTypeName}
-                  onChange={(e) => setNewAdhesiveTypeName(e.target.value)}
-                  placeholder="Örn: Akrilik"
-                />
-              </div>
-              <div>
-                <Label>Kısaltma / Kod</Label>
-                <Input
-                  type="text"
-                  value={newAdhesiveTypeCode}
-                  onChange={(e) => setNewAdhesiveTypeCode(e.target.value)}
-                  placeholder="Örn: AD1"
-                />
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div>
-          <Label>
-            Stok Birimi <span className="text-red-500">*</span>
+            Ölçü Birimi <span className="text-red-500">*</span>
           </Label>
           <Select
             options={stockUnitOptions}
-            value={stockUnit}
-            onChange={(v: string) => setStockUnit(v as StockUnit)}
-            placeholder="Alan (m²) / Ağırlık (kg) / Uzunluk (m) / Adet (EA)"
-          />
-        </div>
-      </div>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <div>
-          <Label>
-            Kalınlık <span className="text-red-500">*</span>
-          </Label>
-          <div className="grid grid-cols-2 gap-2">
-            <Input
-              type="number"
-              min="0"
-              className="w-full"
-              value={thickness}
-              onChange={(e) => setThickness(e.target.value)}
-              placeholder={lengthUnit === "m" ? "metre" : "µm"}
-            />
-            <Select
-              options={thicknessUnitOptions}
-              value={lengthUnit}
-              onChange={(v: string) => setLengthUnit(v as ThicknessUnit)}
-              placeholder="m / µm"
-            />
-          </div>
-        </div>
-
-        <div>
-          <Label>
-            Taşıyıcı Yoğunluk <span className="text-red-500">*</span>
-          </Label>
-          <Input
-            type="number"
-            min="0"
-            value={carrierDensity}
-            onChange={(e) => setCarrierDensity(e.target.value)}
-            placeholder="Opsiyonel"
-          />
-        </div>
-      </div>
-
-      <div className="space-y-4">
-        <div>
-          <Label>
-            Bimeks Ürün Tanımı <span className="text-red-500">*</span>
-          </Label>
-          <Input
-            type="text"
-            value={bimeksProductName}
-            onChange={(e) => setBimeksProductName(e.target.value)}
-            placeholder="Örn: Çift Taraflı Köpük Bant 1mm ..."
-          />
-        </div>
-
-        <div>
-          <Label>
-            Tedarikçi Ürün Kodu <span className="text-red-500">*</span>
-          </Label>
-          <Input
-            type="text"
-            value={supplierProductCode}
-            onChange={(e) => setSupplierProductCode(e.target.value)}
-            placeholder="Örn: 3M-9080HL"
-          />
-        </div>
-
-        <div>
-          <Label>Bimeks Kodu</Label>
-          <Input
-            type="text"
-            value={bimeksCode}
-            disabled
-            placeholder="Kayıt sonrasında otomatik oluşturulacak"
+            value={stockUnitId}
+            onChange={setStockUnitId}
+            placeholder="Seçiniz"
           />
         </div>
       </div>
 
       <div className="mt-2 flex gap-3">
-        <Button variant="primary" onClick={handleSave} disabled={saving}>
-          {saving ? "Kaydediliyor..." : "Kaydet"}
+        <Button variant="primary" onClick={handleSaveMaster} disabled={saving}>
+          {saving ? "Kaydediliyor..." : "Tanımı Kaydet"}
         </Button>
-        <Button variant="outline" onClick={onCancel}>
-          Vazgeç
-        </Button>
+      </div>
+
+      <div className="text-xs text-gray-500 dark:text-gray-400">
+        Not: Kategori / Tür / Tedarikçi ekleme işlemleri “tekil kaydet & seç” mantığıyla çalışır; master kaydı ayrı kaydedilir.
       </div>
     </div>
   );
 }
 
-// EMPTY_SELECT_OPTION'ı kaldırıp her Select'e direkt placeholder verelim
+/* ============= STOCK ROW (AYNEN KALSIN) ============= */
 
-/* ============= STOCK ROW COMPONENT ============= */
 interface StockRowProps {
   row: Row;
   warehouseOptions: { value: string; label: string }[];
@@ -968,13 +611,13 @@ function StockRow({
   onDelete,
   ensureLocations,
 }: StockRowProps) {
-  const locationOptions = useMemo(() => {      
+  const locationOptions = useMemo(() => {
     const wh = row.warehouse_id || "";
     const locations = wh ? locationsByWarehouse[Number(wh)] || [] : [];
     return locations.map((l) => createSelectOption(l.id, l.name));
   }, [row.warehouse_id, locationsByWarehouse]);
 
-  const stockUnit = row.stock_unit || "area";
+  const stockUnit = (row.stock_unit_code || "area") as StockUnitCode;
   const isArea = stockUnit === "area";
   const isWeight = stockUnit === "weight";
   const isLength = stockUnit === "length";
@@ -996,18 +639,10 @@ function StockRow({
             <div className="flex flex-col">
               <span
                 className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate"
-                title={row.bimeks_product_name || row.display_label}
+                title={row.display_label}
               >
-                {row.bimeks_product_name || row.display_label}
+                {row.display_label}
               </span>
-              {row.bimeks_code && (
-                <span
-                  className="mt-0.5 text-xs font-mono text-gray-500 dark:text-gray-400 truncate"
-                  title={row.bimeks_code}
-                >
-                  {row.bimeks_code}
-                </span>
-              )}
             </div>
           </div>
           <div className="flex gap-2">
@@ -1110,9 +745,7 @@ function StockRow({
               options={locationOptions}
               value={row.location_id || ""}
               placeholder="Lokasyon Seçiniz"
-              onChange={(val: string) =>
-                onUpdate(row.id, { location_id: val })
-              }
+              onChange={(val: string) => onUpdate(row.id, { location_id: val })}
             />
           </div>
 
@@ -1121,26 +754,25 @@ function StockRow({
             <Input
               type="text"
               value={row.invoice_no || ""}
-              onChange={(e) =>
-                onUpdate(row.id, { invoice_no: e.target.value })
-              }
+              onChange={(e) => onUpdate(row.id, { invoice_no: e.target.value })}
               placeholder="Opsiyonel"
             />
           </div>
         </div>
       </div>
 
-      {/* Desktop: 6 kolonlu Excel düzeni */}
+      {/* Desktop: 2 satırlı grid düzeni */}
       <div className="hidden md:block">
         <div className="space-y-2">
-          {/* Satır 1: ÜRÜN ADI | ADET | EN | BOY | DEPO | + */}
+          {/* Row 1 */}
           <div className="grid grid-cols-[2.5fr_1fr_1fr_1fr_1.5fr_auto] gap-2 items-center">
-            {/* Kolon 1: Bimeks Ürün Adı */}
-            <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate" title={row.bimeks_product_name || row.display_label}>
-              {row.bimeks_product_name || row.display_label}
+            <div
+              className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate"
+              title={row.display_label}
+            >
+              {row.display_label}
             </div>
-            
-            {/* Kolon 2: Adet */}
+
             <div className="relative">
               <Input
                 type="number"
@@ -1157,8 +789,7 @@ function StockRow({
                 Ad.
               </span>
             </div>
-            
-            {/* Kolon 3: En */}
+
             <Input
               type="number"
               min="0"
@@ -1168,8 +799,7 @@ function StockRow({
               placeholder="En (m)"
               disabled={!isArea}
             />
-            
-            {/* Kolon 4: Boy */}
+
             <Input
               type="number"
               min="0"
@@ -1179,16 +809,14 @@ function StockRow({
               placeholder="Boy (m)"
               disabled={!isArea}
             />
-            
-            {/* Kolon 5: Depo */}
+
             <Select
               options={warehouseOptions}
               value={row.warehouse_id || ""}
               placeholder="Depo Seçiniz"
               onChange={handleWarehouseChange}
             />
-            
-            {/* Kolon 6: + Butonu */}
+
             <Button
               variant="outline"
               className="h-10 w-10 p-0"
@@ -1198,22 +826,19 @@ function StockRow({
             </Button>
           </div>
 
-          {/* Satır 2: ÜRÜN KODU | FATURA NO | AĞIRLIK | UZUNLUK | LOKASYON | - */}
+          {/* Row 2 */}
           <div className="grid grid-cols-[2.5fr_1fr_1fr_1fr_1.5fr_auto] gap-2 items-center">
-            {/* Kolon 1: Bimeks Kodu */}
-            <div className="text-sm font-medium text-gray-600 dark:text-gray-400 truncate" title={row.bimeks_code || ""}>
-              {row.bimeks_code || "-"}
+            <div className="text-sm font-medium text-gray-600 dark:text-gray-400 truncate">
+              {row.stock_unit_code ? `Ölçü: ${row.stock_unit_code}` : "—"}
             </div>
-            
-            {/* Kolon 2: Fatura No */}
+
             <Input
               type="text"
               value={row.invoice_no || ""}
               onChange={(e) => onUpdate(row.id, { invoice_no: e.target.value })}
               placeholder="Fatura No"
             />
-            
-            {/* Kolon 3: Ağırlık */}
+
             <Input
               type="number"
               min="0"
@@ -1223,8 +848,7 @@ function StockRow({
               placeholder="Ağırlık (kg)"
               disabled={!isWeight}
             />
-            
-            {/* Kolon 4: Uzunluk */}
+
             <Input
               type="number"
               min="0"
@@ -1234,16 +858,14 @@ function StockRow({
               placeholder="Uzunluk (m)"
               disabled={!isLength}
             />
-            
-            {/* Kolon 5: Lokasyon */}
+
             <Select
               options={locationOptions}
               value={row.location_id || ""}
               placeholder="Lokasyon Seçiniz"
               onChange={(val: string) => onUpdate(row.id, { location_id: val })}
             />
-            
-            {/* Kolon 6: - Butonu */}
+
             <Button
               variant="outline"
               className="h-10 w-10 p-0"
@@ -1258,34 +880,34 @@ function StockRow({
   );
 }
 
-/* ============= MAIN COMPONENT ============= */
+/* ============= PAGE ============= */
+
 export default function StockEntryPage() {
-  const location = useLocation();
-  const preset = (location.state || {}) as {
-    categoryName?: string;
-    typeId?: string;
-    masterId?: string;
-  };
-
   // Lookups
-  const [categories, setCategories] = useState<ProductType[]>([]);
-  const [types, setTypes] = useState<CarrierType[]>([]);
-  const [mastersRaw, setMastersRaw] = useState<Master[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [types, setTypes] = useState<TypeRow[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [stockUnits, setStockUnits] = useState<StockUnit[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [suppliers, setSuppliers] = useState<SimpleLookup[]>([]);
-  const [locationsByWarehouse, setLocationsByWarehouse] = useState<
-    Record<number, Location[]>
-  >({});
+  const [locationsByWarehouse, setLocationsByWarehouse] = useState<Record<number, Location[]>>({});
 
-  // Selections
-  const [categoryName, setCategoryName] = useState("");
-  const [typeId, setTypeId] = useState("");
-  const [selectedMasterIds, setSelectedMasterIds] = useState<string[]>([]);
+  // Masters
+  const [mastersRaw, setMastersRaw] = useState<Master[]>([]);
+
+  // Filters
+  const [filterCategoryId, setFilterCategoryId] = useState<string>("");
+  const [filterTypeId, setFilterTypeId] = useState<string>("");
+  const [filterSupplierId, setFilterSupplierId] = useState<string>("");
   const [masterSearch, setMasterSearch] = useState("");
-  const [createOpen, setCreateOpen] = useState(false);
-  const [supplierFilterId, setSupplierFilterId] = useState("");
 
-  // Rows & Global Settings
+  // ✅ debounce: arama yazarken her harfte request atmasın
+  const debouncedSearch = useDebouncedValue(masterSearch, 350);
+
+  // Selection
+  const [selectedMasterIds, setSelectedMasterIds] = useState<string[]>([]);
+  const [createOpen, setCreateOpen] = useState(false);
+
+  // Rows & Global Settings (stok girişi)
   const [rows, setRows] = useState<Row[]>([]);
   const [globalSettings, setGlobalSettings] = useState<GlobalSettings>({
     invoice: "",
@@ -1298,157 +920,109 @@ export default function StockEntryPage() {
   const rowsSectionRef = useRef<HTMLDivElement>(null);
   const alertRef = useRef<HTMLDivElement>(null);
 
-  // Initial data load
-  useEffect(() => {
-    Promise.all([
-      api.get("/lookups/product-types"),
-      api.get("/lookups/warehouses"),
-      api.get("/lookups/suppliers"),
-      api.get("/masters"),
-    ]).then(([categoriesRes, warehousesRes, suppliersRes, mastersRes]) => {
-      setCategories(categoriesRes.data || []);
-      setWarehouses(warehousesRes.data || []);
-      setSuppliers(suppliersRes.data || []);
-      setMastersRaw(mastersRes.data || []);
-    });
+  const showAlert = useCallback((alert: AlertState) => {
+    setUiAlert(alert);
+    setTimeout(() => {
+      alertRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
   }, []);
 
-  // Apply preset
+  const refreshMasters = useCallback(async () => {
+    const params = new URLSearchParams();
+    if (filterCategoryId) params.set("categoryId", filterCategoryId);
+    if (filterTypeId) params.set("typeId", filterTypeId);
+    if (filterSupplierId) params.set("supplierId", filterSupplierId);
+    if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
+
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    const res = await api.get(`/masters${qs}`);
+    setMastersRaw(res.data || []);
+  }, [filterCategoryId, filterTypeId, filterSupplierId, debouncedSearch]);
+
+  // initial load
   useEffect(() => {
-    if (preset.categoryName) {
-      setCategoryName(preset.categoryName);
-    }
-  }, [preset.categoryName]);
+    (async () => {
+      try {
+        const [catRes, supRes, suRes, whRes] = await Promise.all([
+          api.get("/lookups/categories"),
+          api.get("/lookups/suppliers"),
+          api.get("/lookups/stock-units"),
+          api.get("/lookups/warehouses"),
+        ]);
 
-  // Load types and masters when category changes
-  useEffect(() => {
-    setTypeId("");
-    const category = categories.find((c) => c.name === categoryName);
+        setCategories(catRes.data || []);
+        setSuppliers(supRes.data || []);
+        setStockUnits(suRes.data || []);
+        setWarehouses(whRes.data || []);
 
-    if (!category) {
-      setTypes([]);
-      api.get("/masters").then((r) => setMastersRaw(r.data || []));
-      return;
-    }
-
-    Promise.all([
-      api.get(`/lookups/carrier-types?productTypeId=${category.id}`),
-      api.get(`/masters?productTypeId=${category.id}`),
-    ]).then(([typesRes, mastersRes]) => {
-      setTypes(typesRes.data || []);
-      setMastersRaw(mastersRes.data || []);
-    });
-  }, [categoryName, categories]);
-
-  // Load masters when type changes
-  useEffect(() => {
-    const category = categories.find((c) => c.name === categoryName);
-
-    if (!typeId) {
-      const endpoint = category
-        ? `/masters?productTypeId=${category.id}`
-        : "/masters";
-      api.get(endpoint).then((r) => setMastersRaw(r.data || []));
-      return;
-    }
-
-    if (category) {
-      api
-        .get(`/masters?productTypeId=${category.id}&carrierTypeId=${typeId}`)
-        .then((r) => setMastersRaw(r.data || []))
-        .catch(() => {
-          setMastersRaw((prev) =>
-            prev.filter(
-              (m) =>
-                (m.carrier_type_id &&
-                  Number(m.carrier_type_id) === Number(typeId)) ||
-                !m.carrier_type_id
-            )
-          );
+        // initial masters
+        const mRes = await api.get("/masters");
+        setMastersRaw(mRes.data || []);
+      } catch (e) {
+        console.error(e);
+        showAlert({
+          variant: "error",
+          title: "Yükleme hatası",
+          message: "Lookups veya master listesi yüklenemedi.",
         });
-    }
-  }, [typeId, categoryName, categories, types]);
+      }
+    })();
+  }, [showAlert]);
 
-  // Apply preset master
+  // filter category -> load types + reset type filter
   useEffect(() => {
-    if (!preset.masterId) return;
-    const exists = mastersRaw.find(
-      (m) => String(m.id) === String(preset.masterId)
-    );
-    if (exists) {
-      setSelectedMasterIds((prev) =>
-        Array.from(new Set([...prev, String(exists.id)]))
-      );
-    }
-  }, [mastersRaw, preset.masterId]);
+    setFilterTypeId("");
+    setTypes([]);
 
-  // Computed values
-  const filteredMasters = useMemo(() => {
-    if (!typeId) return mastersRaw;
-    const idNum = Number(typeId);
-    return mastersRaw.filter(
-      (m) =>
-        (m.carrier_type_id && Number(m.carrier_type_id) === idNum) ||
-        !m.carrier_type_id
-    );
-  }, [mastersRaw, typeId]);
+    const catId = Number(filterCategoryId);
+    if (!catId) return;
 
-  const filteredForPanel = useMemo(() => {
-    const term = masterSearch.toLowerCase();
+    api
+      .get(`/lookups/types/${catId}`)
+      .then((r) => setTypes(r.data || []))
+      .catch((e) => {
+        console.error(e);
+        setTypes([]);
+      });
+  }, [filterCategoryId]);
 
-    const bySupplier = supplierFilterId
-      ? filteredMasters.filter(
-          (m) => m.supplier_id && String(m.supplier_id) === supplierFilterId
-        )
-      : filteredMasters;
+  // ✅ any filter change -> reload masters (kategori/tür/tedarikçi değişince anında)
+  useEffect(() => {
+    refreshMasters().catch((e) => console.error(e));
+  }, [refreshMasters]);
 
-    if (!term) return bySupplier;
+  const categoryOptions = useMemo(
+    () => [
+      createSelectOption("", "Tümü"),
+      ...categories.map((c) => createSelectOption(c.id, c.name)),
+    ],
+    [categories]
+  );
 
-    return bySupplier.filter((m) => {
-      const label = (
-        m.display_label ||
-        `${m.bimeks_code ?? ""} - ${m.bimeks_product_name ?? ""}`
-      )
-        .toString()
-        .toLowerCase();
+  const typeOptions = useMemo(
+    () => [
+      createSelectOption("", "Tümü"),
+      ...types.map((t) => createSelectOption(t.id, t.name)),
+    ],
+    [types]
+  );
 
-      const name = (m.bimeks_product_name ?? "").toLowerCase();
-      const supplier = (m.supplier_name ?? "").toLowerCase();
-      const code = (m.bimeks_code ?? "").toLowerCase();
-
-      return (
-        label.includes(term) ||
-        name.includes(term) ||
-        supplier.includes(term) ||
-        code.includes(term)
-      );
-    });
-  }, [filteredMasters, masterSearch, supplierFilterId]);
+  const supplierOptions = useMemo(
+    () => [
+      createSelectOption("", "Tümü"),
+      ...suppliers.map((s) => createSelectOption(s.id, s.name)),
+    ],
+    [suppliers]
+  );
 
   const warehouseOptions = useMemo(
     () => [
-      EMPTY_SELECT_OPTION,
+      createSelectOption("", "Seçiniz", true),
       ...warehouses.map((w) => createSelectOption(w.id, w.name)),
     ],
     [warehouses]
   );
 
-  const globalLocationOptions = useMemo(
-    () => [
-      EMPTY_SELECT_OPTION,
-      ...(globalSettings.warehouse
-        ? locationsByWarehouse[Number(globalSettings.warehouse)] || []
-        : []
-      ).map((l) => createSelectOption(l.id, l.name)),
-    ],
-    [globalSettings.warehouse, locationsByWarehouse]
-  );
-
-  const isStockSaveEnabled =
-    rows.length > 0 &&
-    rows.every((r) => Number(r.qty) >= 1 && r.warehouse_id && r.location_id);
-
-  // Handlers
   const ensureLocations = useCallback(
     async (warehouseId: string | number): Promise<Location[]> => {
       const id = Number(warehouseId);
@@ -1464,62 +1038,53 @@ export default function StockEntryPage() {
     [locationsByWarehouse]
   );
 
-  const showAlert = useCallback((alert: AlertState) => {
-    setUiAlert(alert);
-    setTimeout(() => {
-      alertRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 0);
-  }, []);
+  const globalLocationOptions = useMemo(
+    () => [
+      createSelectOption("", "Seçiniz", true),
+      ...(globalSettings.warehouse
+        ? locationsByWarehouse[Number(globalSettings.warehouse)] || []
+        : []
+      ).map((l) => createSelectOption(l.id, l.name)),
+    ],
+    [globalSettings.warehouse, locationsByWarehouse]
+  );
+
+  // ✅ Panel listesi artık server filtreli geliyor; ayrıca “ölçü birimi” arama kapsamından çıkarıldı.
+  // Yine de UI tarafında ekstra filtre istemiyorsan aynen mastersRaw kullanıyoruz.
+  const filteredForPanel = useMemo(() => mastersRaw, [mastersRaw]);
 
   const handleApplySelections = useCallback(() => {
-  const currentMasterIds = new Set(rows.map((r) => String(r.master_id)));
-  const toAdd = selectedMasterIds.filter((id) => !currentMasterIds.has(id));
+    const currentMasterIds = new Set(rows.map((r) => String(r.master_id)));
+    const toAdd = selectedMasterIds.filter((id) => !currentMasterIds.has(id));
 
-  const newRows: Row[] = toAdd.map((id) => {
-  const master = filteredMasters.find((m) => String(m.id) === id)!;
+    const newRows: Row[] = toAdd.map((id) => {
+      const master = mastersRaw.find((m) => String(m.id) === id)!;
 
-  const name =
-    master.bimeks_product_name ||
-    master.display_label ||
-    `#${master.id}`;
+      return {
+        id: uid(),
+        master_id: master.id,
+        display_label: master.display_label,
+        qty: 1,
 
-  const code = master.bimeks_code || "";
+        width: "",
+        height: "",
+        weight: "",
+        length: "",
 
-  const display = code || name;
+        warehouse_id: "",
+        location_id: "",
+        invoice_no: globalSettings.invoice || "",
 
-  return {
-      id: uid(),
-      master_id: master.id,
-      display_label: display,
-      qty: 1,
-
-      width: "",
-      height: "",
-      weight: "",    // 🔹 yeni
-      length: "",    // 🔹 yeni
-
-      warehouse_id: "",
-      location_id: "",
-      invoice_no: globalSettings.invoice || "",
-
-      thickness_unit: master.thickness_unit as ThicknessUnit | undefined,
-      stock_unit: master.stock_unit as StockUnit | undefined, // 🔹 master’dan miras
-
-      bimeks_code: code,
-      bimeks_product_name: name,
-    };
-  });
+        stock_unit_code: master.stock_unit_code,
+      };
+    });
 
     const mastersToKeep = new Set(selectedMasterIds);
-    const rowsAfterRemoval = rows.filter((r) =>
-      mastersToKeep.has(String(r.master_id))
-    );
+    const rowsAfterRemoval = rows.filter((r) => mastersToKeep.has(String(r.master_id)));
 
     const removedCount = rows.length - rowsAfterRemoval.length;
     if (removedCount > 0) {
-      const ok = confirm(
-        `${removedCount} satır kaldırılacak. Devam edilsin mi?`
-      );
+      const ok = confirm(`${removedCount} satır kaldırılacak. Devam edilsin mi?`);
       if (!ok) return;
     }
 
@@ -1530,13 +1095,10 @@ export default function StockEntryPage() {
         block: "start",
       });
     }, 0);
-  }, [rows, selectedMasterIds, filteredMasters, globalSettings.invoice]);
-
+  }, [rows, selectedMasterIds, mastersRaw, globalSettings.invoice]);
 
   const updateRow = useCallback((id: string, updates: Partial<Row>) => {
-    setRows((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, ...updates } : r))
-    );
+    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...updates } : r)));
   }, []);
 
   const cloneRow = useCallback((rowId: string) => {
@@ -1546,7 +1108,6 @@ export default function StockEntryPage() {
 
       const original = prev[idx];
       const copy: Row = { ...original, id: uid(), qty: 1 };
-
       const next = [...prev];
       next.splice(idx + 1, 0, copy);
       return next;
@@ -1557,13 +1118,22 @@ export default function StockEntryPage() {
     setRows((prev) => prev.filter((r) => r.id !== rowId));
   }, []);
 
+  const handleGlobalWarehouseChange = useCallback(
+    async (val: string) => {
+      setGlobalSettings((prev) => ({ ...prev, warehouse: val }));
+      const locs = await ensureLocations(val);
+      const firstLoc = String(locs[0]?.id || "");
+      setGlobalSettings((prev) => ({ ...prev, location: firstLoc }));
+    },
+    [ensureLocations]
+  );
+
   const applyGlobalsToAll = useCallback(async () => {
     let nextRows = [...rows];
 
     if (globalSettings.warehouse) {
       const locs = await ensureLocations(globalSettings.warehouse);
-      const firstLocId =
-        globalSettings.location || String(locs[0]?.id || "");
+      const firstLocId = globalSettings.location || String(locs[0]?.id || "");
 
       nextRows = nextRows.map((r) => ({
         ...r,
@@ -1584,121 +1154,82 @@ export default function StockEntryPage() {
     setRows(nextRows);
   }, [rows, globalSettings, ensureLocations]);
 
-  const handleSave = useCallback(async () => {
-  try {
-    if (!rows.length) {
-      showAlert({
-        variant: "warning",
-        title: "Eksik bilgi",
-        message: "Önce tanım seçip satır oluşturun.",
-      });
-      return;
-    }
+  const isStockSaveEnabled =
+    rows.length > 0 &&
+    rows.every((r) => Number(r.qty) >= 1 && r.warehouse_id && r.location_id);
 
-    // 🔴 En / boy zorunlu kontrolü
-    // 🔴 Ölçü alanları zorunlu kontrolü (stok birimine göre)
-    const dimErrors: string[] = [];
-
-    rows.forEach((r, idx) => {
-      const master = mastersRaw.find((m) => m.id === r.master_id);
-      const stockUnit = (master?.stock_unit || "area") as StockUnit;
-
-      const w =
-        r.width !== undefined && r.width !== null && r.width !== ""
-          ? Number(r.width)
-          : NaN;
-
-      const h =
-        r.height !== undefined && r.height !== null && r.height !== ""
-          ? Number(r.height)
-          : NaN;
-
-      const weight =
-        r.weight !== undefined && r.weight !== null && r.weight !== ""
-          ? Number(r.weight)
-          : NaN;
-
-      const length =
-        r.length !== undefined && r.length !== null && r.length !== ""
-          ? Number(r.length)
-          : NaN;
-
-      if (stockUnit === "area") {
-        if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
-          dimErrors.push(String(idx + 1));
-        }
-      } else if (stockUnit === "weight") {
-        if (!Number.isFinite(weight) || weight <= 0) {
-          dimErrors.push(String(idx + 1));
-        }
-      } else if (stockUnit === "length") {
-        if (!Number.isFinite(length) || length <= 0) {
-          dimErrors.push(String(idx + 1));
-        }
-      } else if (stockUnit === "unit") {
-        // Adet birimi → ekstra ölçü zorunluluğu yok, sadece qty>=1 kontrolü yeterli.
-        // Burada dimErrors'a bir şey eklemiyoruz.
-      }
-    });
-
-
-    if (dimErrors.length) {
-      showAlert({
-        variant: "warning",
-        title: "Ölçü alanı eksik veya hatalı",
-        message:
-          "Şu satırlarda stok birimine göre ölçü alanları zorunludur ve 0'dan büyük olmalıdır: " +
-          dimErrors.join(", "),
-      });
-      return;
-    }
-
-
-    const payload: any[] = [];
-    rows.forEach((r) => {
-      const master = mastersRaw.find((m) => m.id === r.master_id);
-      const unit = (master?.default_unit || "EA") as "EA" | "M" | "KG";
-      const stockUnit = (master?.stock_unit || "area") as StockUnit;
-
-      const width =
-        r.width !== undefined && r.width !== null && r.width !== ""
-          ? Number(r.width)
-          : null;
-
-      const height =
-        r.height !== undefined && r.height !== null && r.height !== ""
-          ? Number(r.height)
-          : null;
-
-      const weight =
-        r.weight !== undefined && r.weight !== null && r.weight !== ""
-          ? Number(r.weight)
-          : null;
-
-      const length =
-        r.length !== undefined && r.length !== null && r.length !== ""
-          ? Number(r.length)
-          : null;
-
-      for (let i = 0; i < Number(r.qty); i++) {
-        payload.push({
-          master_id: r.master_id,
-          unit,
-          quantity: 1,
-          warehouse_id: Number(r.warehouse_id),
-          location_id: Number(r.location_id),
-
-          // stok birimine göre sadece gerekli alanları doldur
-          width: stockUnit === "area" ? width : null,
-          height: stockUnit === "area" ? height : null,
-          weight: stockUnit === "weight" ? weight : null,
-          length: stockUnit === "length" ? length : null,
-
-          invoice_no: r.invoice_no?.trim() || null,
+  // stok kaydet (aynı mantık, sadece stock_unit_code üzerinden)
+  const handleSaveStock = useCallback(async () => {
+    try {
+      if (!rows.length) {
+        showAlert({
+          variant: "warning",
+          title: "Eksik bilgi",
+          message: "Önce tanım seçip satır oluşturun.",
         });
+        return;
       }
-    });
 
+      const dimErrors: string[] = [];
+
+      rows.forEach((r, idx) => {
+        const master = mastersRaw.find((m) => m.id === r.master_id);
+        const stockUnit = (master?.stock_unit_code || r.stock_unit_code || "area") as StockUnitCode;
+
+        const w = r.width ? Number(r.width) : NaN;
+        const h = r.height ? Number(r.height) : NaN;
+        const weight = r.weight ? Number(r.weight) : NaN;
+        const length = r.length ? Number(r.length) : NaN;
+
+        if (stockUnit === "area") {
+          if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) dimErrors.push(String(idx + 1));
+        } else if (stockUnit === "weight") {
+          if (!Number.isFinite(weight) || weight <= 0) dimErrors.push(String(idx + 1));
+        } else if (stockUnit === "length") {
+          if (!Number.isFinite(length) || length <= 0) dimErrors.push(String(idx + 1));
+        } else if (stockUnit === "unit") {
+          // sadece qty yeterli
+        }
+      });
+
+      if (dimErrors.length) {
+        showAlert({
+          variant: "warning",
+          title: "Ölçü alanı eksik veya hatalı",
+          message:
+            "Şu satırlarda stok birimine göre ölçü alanları zorunludur ve 0'dan büyük olmalıdır: " +
+            dimErrors.join(", "),
+        });
+        return;
+      }
+
+      const payload: any[] = [];
+      rows.forEach((r) => {
+        const master = mastersRaw.find((m) => m.id === r.master_id);
+        const stockUnit = (master?.stock_unit_code || r.stock_unit_code || "area") as StockUnitCode;
+
+        const width = r.width ? Number(r.width) : null;
+        const height = r.height ? Number(r.height) : null;
+        const weight = r.weight ? Number(r.weight) : null;
+        const length = r.length ? Number(r.length) : null;
+
+        for (let i = 0; i < Number(r.qty); i++) {
+          payload.push({
+            master_id: r.master_id,
+            unit: "EA",
+            quantity: 1,
+            warehouse_id: Number(r.warehouse_id),
+            location_id: Number(r.location_id),
+
+            width: stockUnit === "area" ? width : null,
+            height: stockUnit === "area" ? height : null,
+            weight: stockUnit === "weight" ? weight : null,
+            length: stockUnit === "length" ? length : null,
+
+            invoice_no: r.invoice_no?.trim() || null,
+          });
+        }
+      });
 
       const res = await api.post("/components/bulk", payload);
 
@@ -1708,31 +1239,9 @@ export default function StockEntryPage() {
         message: `${res?.data?.length ?? payload.length} kayıt eklendi.`,
       });
 
-      setTimeout(() => {
-        alertRef.current?.scrollIntoView({
-          behavior: "smooth",
-          block: "start",
-        });
-      }, 0);
-
       setRows([]);
     } catch (err: any) {
       console.error("Stok kaydı hatası:", err);
-      const { status, data } = err?.response || {};
-
-      if (status === 400 && data?.errors?.length) {
-        const msg = data.errors
-          .map((e: any) => `• Satır ${e.index + 1} - ${e.field}: ${e.message}`)
-          .join("\n");
-
-        showAlert({
-          variant: "error",
-          title: "Validasyon hatası",
-          message: msg,
-        });
-        return;
-      }
-
       showAlert({
         variant: "error",
         title: "Beklenmeyen hata",
@@ -1741,29 +1250,48 @@ export default function StockEntryPage() {
     }
   }, [rows, mastersRaw, showAlert]);
 
-  const handleGlobalWarehouseChange = useCallback(
-    async (val: string) => {
-      setGlobalSettings((prev) => ({ ...prev, warehouse: val }));
-      const locs = await ensureLocations(val);
-      const firstLoc = String(locs[0]?.id || "");
-      setGlobalSettings((prev) => ({ ...prev, location: firstLoc }));
-    },
-    [ensureLocations]
-  );
+  // Lookup create handlers (aynı kalsın)
+  const handleCreateCategory = useCallback(
+    async (name: string): Promise<Category> => {
+      const exists = categories.find((c) => c.name.toLowerCase() === name.toLowerCase());
+      if (exists) return exists;
 
-  const categoryOptions = useMemo(
-    () => [
-      createSelectOption("", "Tümü"),
-      ...categories.map((c) => createSelectOption(c.name, c.name)),
-    ],
+      const res = await api.post("/lookups/categories", { name });
+      const created = res.data as Category;
+
+      setCategories((prev) => [...prev, created]);
+      return created;
+    },
     [categories]
   );
 
-  const supplierFilterOptions = useMemo(
-    () => [
-      createSelectOption("", "Tümü"),
-      ...suppliers.map((s) => createSelectOption(s.id, s.name)),
-    ],
+  const handleCreateType = useCallback(
+    async (name: string, categoryId: number): Promise<TypeRow> => {
+      const exists = types.find(
+        (t) => t.category_id === categoryId && t.name.toLowerCase() === name.toLowerCase()
+      );
+      if (exists) return exists;
+
+      const res = await api.post("/lookups/types", { name, category_id: categoryId });
+      const created = res.data as TypeRow;
+
+      setTypes((prev) => [...prev, created]);
+      return created;
+    },
+    [types]
+  );
+
+  const handleCreateSupplier = useCallback(
+    async (name: string): Promise<Supplier> => {
+      const exists = suppliers.find((s) => s.name.toLowerCase() === name.toLowerCase());
+      if (exists) return exists;
+
+      const res = await api.post("/lookups/suppliers", { name });
+      const created = res.data as Supplier;
+
+      setSuppliers((prev) => [...prev, created]);
+      return created;
+    },
     [suppliers]
   );
 
@@ -1771,7 +1299,7 @@ export default function StockEntryPage() {
     <div className="space-y-6">
       <PageMeta
         title="Stok Girişi"
-        description="Tanım seç + yeni tanım ekle + satırlardan stok girişi"
+        description="Master seç + yeni master ekle + satırlardan stok girişi"
       />
       <PageBreadcrumb pageTitle="Stok Girişi" />
 
@@ -1779,9 +1307,7 @@ export default function StockEntryPage() {
       <ComponentCard title="Tanım Seçimi">
         <details
           open={createOpen}
-          onToggle={(e) =>
-            setCreateOpen((e.target as HTMLDetailsElement).open)
-          }
+          onToggle={(e) => setCreateOpen((e.target as HTMLDetailsElement).open)}
           className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900/40"
         >
           <summary className="cursor-pointer select-none text-sm font-semibold text-gray-800 dark:text-gray-100 hover:text-gray-900 dark:hover:text-white">
@@ -1790,48 +1316,57 @@ export default function StockEntryPage() {
 
           <div className="mt-4">
             <MasterInlineForm
-              onSaved={async (m) => {
-                setSelectedMasterIds((prev) =>
-                  Array.from(new Set([...prev, String(m.id)]))
-                );
-                
-                // Yeni kaydedilen master'ın tam bilgilerini çek
+              categories={categories}
+              suppliers={suppliers}
+              stockUnits={stockUnits}
+              onCreateCategory={handleCreateCategory}
+              onCreateType={handleCreateType}
+              onCreateSupplier={handleCreateSupplier}
+              onCreated={async (created) => {
                 try {
-                  const res = await api.get(`/masters/${m.id}`);
-                  const fullMaster: Master = res.data;
-                  
-                  setMastersRaw((prev) => [fullMaster, ...prev]);
-                } catch (err) {
-                  console.error("Master bilgileri çekilemedi:", err);
-                  // Fallback: en azından ID ve display_label ile ekle
-                  setMastersRaw((prev) => [
-                    {
-                      id: m.id,
-                      display_label: m.display_label || `#${m.id}`,
-                    } as Master,
-                    ...prev,
-                  ]);
+                  const res = await api.get(`/masters/${created.id}`);
+                  const full: Master = res.data;
+                  setMastersRaw((prev) => [full, ...prev]);
+                } catch {
+                  setMastersRaw((prev) => [created, ...prev]);
                 }
+
+                setSelectedMasterIds((prev) =>
+                  Array.from(new Set([...prev, String(created.id)]))
+                );
+                setCreateOpen(false);
               }}
-              onCancel={() => setCreateOpen(false)}
             />
           </div>
         </details>
 
+        {/* Filters */}
         <div className="mt-4">
           <Label>Tanım Seçimi</Label>
           <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900/40">
             <div className="border-b border-gray-100 bg-gray-50 px-3 py-3 text-xs dark:border-gray-800 dark:bg-gray-900/40">
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1.2fr)_minmax(0,1.6fr)]">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.4fr)]">
                 <div>
                   <Label className="mb-1 block text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                    Ürün Türü
+                    Kategori
                   </Label>
                   <Select
                     options={categoryOptions}
-                    value={categoryName}
+                    value={filterCategoryId}
                     placeholder="Tümü"
-                    onChange={setCategoryName}
+                    onChange={setFilterCategoryId}
+                  />
+                </div>
+
+                <div>
+                  <Label className="mb-1 block text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    Tür
+                  </Label>
+                  <Select
+                    options={typeOptions}
+                    value={filterTypeId}
+                    placeholder="Tümü"
+                    onChange={setFilterTypeId}
                   />
                 </div>
 
@@ -1840,10 +1375,10 @@ export default function StockEntryPage() {
                     Tedarikçi
                   </Label>
                   <Select
-                    options={supplierFilterOptions}
-                    value={supplierFilterId}
+                    options={supplierOptions}
+                    value={filterSupplierId}
                     placeholder="Tümü"
-                    onChange={setSupplierFilterId}
+                    onChange={setFilterSupplierId}
                   />
                 </div>
 
@@ -1854,34 +1389,37 @@ export default function StockEntryPage() {
                     </Label>
                     <Input
                       type="text"
-                      placeholder="Bimeks kodu veya ad ile ara..."
+                      placeholder="Tanım / kategori / tür / tedarikçi"
                       value={masterSearch}
                       onChange={(e) => setMasterSearch(e.target.value)}
                     />
                   </div>
+
                   <Button
                     variant="outline"
                     className="mt-1 h-10 px-4 text-xs font-medium md:mt-0 md:h-10 md:self-end"
                     onClick={() => {
+                      setFilterCategoryId("");
+                      setFilterTypeId("");
+                      setFilterSupplierId("");
                       setMasterSearch("");
-                      setSupplierFilterId("");
-                      setCategoryName("");
                       setSelectedMasterIds([]);
                     }}
                   >
-                    Seçimleri Temizle
+                    Temizle
                   </Button>
                 </div>
               </div>
             </div>
 
-            <div className="max-h-52 overflow-auto pr-0">
-              <div className="sticky top-0 z-10 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-gray-600 dark:border-gray-800 dark:bg-gray-900/60 dark:text-gray-400">
-                <div className="text-left">Bimeks Ürün Tanımı</div>
-                <div className="text-left">Bimeks Kodu</div>
-                <div className="text-left">Ürün Türü</div>
+            {/* List */}
+            <div className="max-h-64 overflow-auto pr-0">
+              <div className="sticky top-0 z-10 grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-gray-600 dark:border-gray-800 dark:bg-gray-900/60 dark:text-gray-400">
+                <div className="text-left">Ürün Tanımı</div>
+                <div className="text-left">Kategori</div>
+                <div className="text-left">Tür</div>
                 <div className="text-left">Tedarikçi</div>
-                <div className="text-left">Tedarikçi Ürün Kodu</div>
+                <div className="text-left">Ölçü Birimi</div>
               </div>
 
               {filteredForPanel.length === 0 ? (
@@ -1894,17 +1432,30 @@ export default function StockEntryPage() {
                     const idStr = String(m.id);
                     const checked = selectedMasterIds.includes(idStr);
 
-                    const displayName =
-                      m.bimeks_product_name || m.display_label || `#${m.id}`;
+                    const catName =
+                      m.category_name ||
+                      categories.find((c) => c.id === m.category_id)?.name ||
+                      "—";
 
-                    const productTypeName =
-                      categories.find((c) => c.id === m.product_type_id)
-                        ?.name || "—";
+                    const typeName =
+                      m.type_name ||
+                      types.find((t) => t.id === m.type_id)?.name ||
+                      "—";
+
+                    const supplierName =
+                      m.supplier_name ||
+                      suppliers.find((s) => s.id === m.supplier_id)?.name ||
+                      "—";
+
+                    const stockUnitLabel =
+                      m.stock_unit_label ||
+                      stockUnits.find((su) => su.id === m.stock_unit_id)?.label ||
+                      (m.stock_unit_code || "—");
 
                     return (
                       <li key={idStr}>
-                        <label className="grid cursor-pointer grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-3 px-4 py-3 text-xs hover:bg-gray-50 dark:hover:bg-gray-800/60 md:text-sm">
-                          <div className="flex items-center gap-2">
+                        <label className="grid cursor-pointer grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-3 px-4 py-3 text-xs hover:bg-gray-50 dark:hover:bg-gray-800/60 md:text-sm">
+                          <div className="flex items-center gap-2 min-w-0">
                             <input
                               type="checkbox"
                               className="h-4 w-4"
@@ -1919,24 +1470,24 @@ export default function StockEntryPage() {
                               }}
                             />
                             <span className="truncate text-gray-800 dark:text-gray-100">
-                              {displayName}
+                              {m.display_label || `#${m.id}`}
                             </span>
                           </div>
 
-                          <div className="truncate font-mono text-xs text-gray-700 dark:text-gray-200">
-                            {m.bimeks_code || "—"}
+                          <div className="truncate text-gray-600 dark:text-gray-300">
+                            {catName}
                           </div>
 
                           <div className="truncate text-gray-600 dark:text-gray-300">
-                            {productTypeName}
+                            {typeName}
                           </div>
 
                           <div className="truncate text-gray-600 dark:text-gray-300">
-                            {m.supplier_name || "—"}
+                            {supplierName}
                           </div>
 
-                          <div className="truncate font-mono text-xs text-gray-700 dark:text-gray-200">
-                            {m.supplier_product_code || "—"}
+                          <div className="truncate text-gray-600 dark:text-gray-300">
+                            {stockUnitLabel}
                           </div>
                         </label>
                       </li>
@@ -1955,7 +1506,7 @@ export default function StockEntryPage() {
         </div>
       </ComponentCard>
 
-      {/* Card #2: Stock Entry Rows */}
+      {/* Card #2: Stock Entry Rows (AYNEN) */}
       {rows.length > 0 && (
         <ComponentCard title="Stok Girişi">
           <div ref={rowsSectionRef} />
@@ -1965,28 +1516,22 @@ export default function StockEntryPage() {
               type="text"
               value={globalSettings.invoice}
               onChange={(e) =>
-                setGlobalSettings((prev) => ({
-                  ...prev,
-                  invoice: e.target.value,
-                }))
+                setGlobalSettings((prev) => ({ ...prev, invoice: e.target.value }))
               }
               placeholder="Fatura No"
             />
             <Select
-              options={warehouseOptions.filter(w => w.value !== "")}
+              options={warehouseOptions.filter((w) => w.value !== "")}
               value={globalSettings.warehouse}
               placeholder="Depo Seçiniz"
               onChange={handleGlobalWarehouseChange}
             />
             <Select
-              options={globalLocationOptions.filter(l => l.value !== "")}
+              options={globalLocationOptions.filter((l) => l.value !== "")}
               value={globalSettings.location}
               placeholder="Lokasyon Seçiniz"
               onChange={(val: string) =>
-                setGlobalSettings((prev) => ({
-                  ...prev,
-                  location: val,
-                }))
+                setGlobalSettings((prev) => ({ ...prev, location: val }))
               }
             />
             <Button
@@ -2000,7 +1545,6 @@ export default function StockEntryPage() {
 
           <div className="my-4 h-px w-full bg-gray-200 dark:bg-gray-700" />
 
-          {/* Rows - header yok artık, sadece kartlar */}
           <div className="mt-4 space-y-4">
             {rows.map((row) => (
               <StockRow
@@ -2019,7 +1563,7 @@ export default function StockEntryPage() {
           <div className="mt-6 flex justify-end">
             <Button
               variant="primary"
-              onClick={handleSave}
+              onClick={handleSaveStock}
               disabled={!isStockSaveEnabled}
             >
               Stok Kaydet
@@ -2027,6 +1571,7 @@ export default function StockEntryPage() {
           </div>
         </ComponentCard>
       )}
+
       <div ref={alertRef} className="mt-4">
         {uiAlert && (
           <Alert
