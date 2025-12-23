@@ -9,6 +9,7 @@ import Button from "../../components/ui/button/Button";
 import api from "../../services/api";
 import { Link } from "react-router-dom";
 import * as XLSX from "xlsx";
+import { formatQtyTR } from "../../utils/numberFormat";
 
 /* ================== TYPES ================== */
 
@@ -56,6 +57,7 @@ type WarehouseOption = { id: number; name: string };
 /* ================== HELPERS ================== */
 
 const dash = <span className="text-gray-400 dark:text-gray-500">—</span>;
+const fmt = (v?: number | string | null) => formatQtyTR(v, { empty: "—" });
 
 function normalizeUnit(u?: string | null): string {
   return (u || "").toString().trim().toLowerCase();
@@ -209,12 +211,12 @@ export default function StockListPage() {
   // ✅ stock_unit'e göre alanları göster
   const unitCodeOf = (r: Row) => normalizeUnit(r.master?.stock_unit?.code || "");
 
-  const renderWidth = (r: Row) => (unitCodeOf(r) === "area" ? (r.width ?? dash) : dash);
-  const renderHeight = (r: Row) => (unitCodeOf(r) === "area" ? (r.height ?? dash) : dash);
-  const renderArea = (r: Row) => (unitCodeOf(r) === "area" ? (r.area ?? dash) : dash);
+  const renderWidth  = (r: Row) => (unitCodeOf(r) === "area"   ? fmt(r.width)  : dash);
+  const renderHeight = (r: Row) => (unitCodeOf(r) === "area"   ? fmt(r.height) : dash);
+  const renderArea   = (r: Row) => (unitCodeOf(r) === "area"   ? fmt(r.area)   : dash);
 
-  const renderWeight = (r: Row) => (unitCodeOf(r) === "weight" ? (r.weight ?? dash) : dash);
-  const renderLength = (r: Row) => (unitCodeOf(r) === "length" ? (r.length ?? dash) : dash);
+  const renderWeight = (r: Row) => (unitCodeOf(r) === "weight" ? fmt(r.weight) : dash);
+  const renderLength = (r: Row) => (unitCodeOf(r) === "length" ? fmt(r.length) : dash);
 
   const renderStatus = (r: Row) => r.status ?? dash;
 

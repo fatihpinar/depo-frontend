@@ -84,8 +84,6 @@ function titleFor(t: TransitionRow): string {
   return ACTION_LABEL_TR[t.action] || String(t.action);
 }
 
-
-
 function humanDetailsTR(t: TransitionRow): string[] {
   const out: string[] = [];
   const m = t.meta || {};
