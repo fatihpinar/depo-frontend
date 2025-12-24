@@ -9,13 +9,11 @@ import Select from "../../components/form/Select";
 import Button from "../../components/ui/button/Button";
 import api from "../../services/api";
 import { formatQtyTR } from "../../utils/numberFormat";
-
-
 import { QrCode } from "lucide-react";
 import BarcodeScannerModal from "../../components/scan/BarcodeScannerModal";
 
 /* -------------------- Config -------------------- */
-const RECIPES_BASE = "/products/recipes";
+const RECIPES_BASE = "/recipes";
 
 /* -------------------- Types -------------------- */
 type RowTarget = "sale" | "stock";
@@ -23,7 +21,7 @@ type QtyMode = "unit" | "quantity";
 type StockUnitCode = "area" | "weight" | "length" | "unit";
 
 type RecipeRow = {
-  recipe_id: string;
+  recipe_id: number;   // ✅ number
   label: string;
 };
 
@@ -147,13 +145,16 @@ export default function ProductAssemble() {
   /* ---------- Tarif listesi & seçim ---------- */
   const [recipes, setRecipes] = useState<RecipeRow[]>([]);
   const [recipeSelect, setRecipeSelect] = useState<string>("none");
+  const [saveRecipeOpen, setSaveRecipeOpen] = useState(false);
+  const [newRecipeName, setNewRecipeName] = useState("");
+  const [savingRecipe, setSavingRecipe] = useState(false);
 
   const loadRecipes = async () => {
     try {
       const { data } = await api.get(RECIPES_BASE);
       const rows: RecipeRow[] = (data || []).map((r: any) => ({
-        recipe_id: r.recipe_id,
-        label: r.recipe_name || r.display_label || r.recipe_id,
+        recipe_id: Number(r.id),              // ✅ id
+        label: r.recipe_name || r.recipe_name || String(r.id),
       }));
       setRecipes(rows);
     } catch (e) {
@@ -217,6 +218,52 @@ export default function ProductAssemble() {
 
   const initial = useMemo(() => makeEmptyRow(), []);
   const [components, setComponents] = useState<PickedComponent[]>([initial.row]);
+  const buildRecipeItemsFromRows = () => {
+  const rows = components.filter((c) => c.stock);
+
+    if (!rows.length) {
+      return { ok: false as const, message: "Tarif için en az 1 component seçmelisiniz." };
+    }
+
+    const items = rows.map((c) => {
+      const stock = c.stock!;
+      const masterId = stock.master?.id;
+      if (!masterId) return null;
+
+      const mode: QtyMode = c.qtyMode || "unit";
+      const qty = mode === "unit" ? 1 : Number(c.consumeQty || 0);
+
+      if (mode === "quantity" && (!qty || qty <= 0)) return null;
+
+      const su = normalizeUnit(stock.master?.stock_unit?.code || "unit");
+      const unit =
+        mode === "unit"
+          ? "EA"
+          : su === "area"
+            ? "M2"
+            : su === "weight"
+              ? "KG"
+              : su === "length"
+                ? "M"
+                : "EA";
+
+      return { component_master_id: masterId, qty, unit };
+    });
+
+    if (items.some((x) => x == null)) {
+      return {
+        ok: false as const,
+        message: "Bazı satırlarda master/qty bilgisi eksik. Component seçimini kontrol edin.",
+      };
+    }
+
+    return {
+      ok: true as const,
+      items: items as Array<{ component_master_id: number; qty: number; unit: string }>,
+    };
+  };
+
+
   const [search, setSearch] = useState<Record<string, string>>({
     [initial.key]: "",
   });
@@ -233,7 +280,7 @@ export default function ProductAssemble() {
   const recipeSelectOptions = useMemo(() => {
     return [
       { value: "none", label: "Tarif seçiniz" },
-      ...recipes.map((r) => ({ value: r.recipe_id, label: r.label })),
+      ...recipes.map((r) => ({ value: String(r.recipe_id), label: r.label })),
     ];
   }, [recipes]);
 
@@ -575,7 +622,7 @@ export default function ProductAssemble() {
       });
 
       const recipe_id =
-        recipeSelect && recipeSelect !== "none" ? recipeSelect : null;
+      recipeSelect && recipeSelect !== "none" ? Number(recipeSelect) : null;
 
       await api.post("/components/exit", {
         recipe_id,
@@ -1277,32 +1324,120 @@ export default function ProductAssemble() {
             );
           })}
 
-          {/* 2) Component Ekle yanında Barkod Oku */}
-          <div className="pt-2 flex gap-2">
-            <Button variant="primary" onClick={addComponentRow}>
-              Component Ekle
+          {/* Satır ekleme aksiyonları */}
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex gap-2">
+              <Button variant="primary" onClick={addComponentRow}>
+                Component Ekle
+              </Button>
+
+              <Button variant="outline" onClick={openScanner}>
+                <span className="inline-flex items-center gap-2">
+                  <QrCode className="h-4 w-4" />
+                  Barkod Oku
+                </span>
+              </Button>
+            </div>
+
+            {/* İstersen sağ tarafa küçük bilgi koyabiliriz */}
+            {/* <div className="text-xs text-gray-500 dark:text-gray-400">Satır: {components.length}</div> */}
+          </div>
+
+          <div className="mt-6 flex items-center justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                const built = buildRecipeItemsFromRows();
+                if (!built.ok) return alert(built.message);
+                setNewRecipeName("");
+                setSaveRecipeOpen(true);
+              }}
+              disabled={!componentsValid} // istersen componentExitValid da yapabilirsin
+            >
+              Tarifi Kaydet
             </Button>
 
-            <Button variant="outline" onClick={openScanner}>
-              <span className="inline-flex items-center gap-2">
-                <QrCode className="w-4 h-4" />
-                Barkod Oku
-              </span>
+            <Button
+              variant="primary"
+              disabled={!componentExitValid}
+              onClick={handleSaveComponentExit}
+            >
+              Kaydet
             </Button>
           </div>
         </div>
-
-        <div className="mt-6 flex items-center justify-end">
-          <Button
-            variant="primary"
-            disabled={!componentExitValid}
-            onClick={handleSaveComponentExit}
-          >
-            Kaydet
-          </Button>
-        </div>
       </ComponentCard>
+      {saveRecipeOpen && (
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-4 shadow-xl dark:border-gray-800 dark:bg-gray-900">
+            <div className="mb-3 text-lg font-semibold text-gray-900 dark:text-gray-100">
+              Tarif Kaydet
+            </div>
 
+            <div className="space-y-2">
+              <Label>Tarif Adı</Label>
+              <Input
+                value={newRecipeName}
+                onChange={(e) => setNewRecipeName(e.target.value)}
+                placeholder="Örn: Tarif Test"
+              />
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Tarif, ekrandaki seçili component satırlarından oluşturulacak.
+              </p>
+            </div>
+
+            <div className="mt-4 flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setSaveRecipeOpen(false)}
+                disabled={savingRecipe}
+              >
+                İptal
+              </Button>
+
+              <Button
+                variant="primary"
+                disabled={savingRecipe}
+                onClick={async () => {
+                  const name = (newRecipeName || "").trim();
+                  if (!name) return alert("Tarif adı giriniz.");
+
+                  const built = buildRecipeItemsFromRows();
+                  if (!built.ok) return alert(built.message);
+
+                  try {
+                    setSavingRecipe(true);
+                    const { data } = await api.post(RECIPES_BASE, {
+                      recipe_name: name,
+                      items: built.items,
+                    });
+
+                    alert("Tarif kaydedildi.");
+
+                    setSaveRecipeOpen(false);
+                    setNewRecipeName("");
+
+                    // listeyi yenile ve yeni tarifi seç
+                    await loadRecipes();
+                    if (data?.id) setRecipeSelect(String(data.id));
+                  } catch (err: any) {
+                    const msg =
+                      err?.response?.data?.message ||
+                      err?.message ||
+                      "Tarif kaydedilemedi.";
+                    alert(msg);
+                    console.error("recipe create error", err?.response?.data || err);
+                  } finally {
+                    setSavingRecipe(false);
+                  }
+                }}
+              >
+                Kaydet
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}        
       {/* Scanner Modal */}
       <BarcodeScannerModal open={scanOpen} onClose={closeScanner} onResult={handleScanResult} />
     </div>

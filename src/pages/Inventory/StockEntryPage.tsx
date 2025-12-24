@@ -1584,3 +1584,6 @@ export default function StockEntryPage() {
     </div>
   );
 }
+
+
+
