@@ -28,7 +28,7 @@ type PendingRow = {
   width?: number | null;
   height?: number | null;
   area?: number | null;
-  master?: { id: number; display_label?: string | null } | null;
+  master?: { id: number; display_label?: string | null; bimeks_code?: string | null } | null;
   warehouse_id?: number | null;
   location_id?: number | null;
 };
@@ -46,6 +46,38 @@ export default function StockReceiptApprovalPage() {
   const [rows, setRows] = useState<PendingRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const handleDeleteSelected = async () => {
+    try {
+      const selectedRows = rows.filter(isSelected);
+      if (!selectedRows.length) return alert("Önce satır seçiniz.");
+
+      if (!confirm(`Seçili ${selectedRows.length} satır silinecek. Emin misiniz?`)) {
+        return;
+      }
+
+      setLoading(true);
+
+      await api.post("/approvals/delete", {
+        scope: "stock",
+        items: selectedRows.map((r) => ({
+          id: r.id,
+          kind: r.kind,
+        })),
+      });
+
+      const ok = new Set(selectedRows.map(keyOf));
+      setRows((prev) => prev.filter((r) => !ok.has(keyOf(r))));
+      setSelectedIds(new Set());
+
+      alert("Seçili kayıtlar silindi.");
+    } catch (e: any) {
+      console.error(e?.response?.data || e);
+      alert(e?.response?.data?.message || "Silme sırasında hata.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   /* selection */
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -242,9 +274,9 @@ export default function StockReceiptApprovalPage() {
     return `${nf.format(a)} m²`;
   };
 
-  // 6 kolon: [cb, Tanım, Barkod, Alan, Depo, Lokasyon]
+  // [cb, Tanım, Barkod, Depo, Lokasyon]
   const GRID_COLS =
-    "grid-cols-[44px_minmax(380px,2fr)_minmax(260px,1.2fr)_120px_180px_200px]";
+  "grid-cols-[56px_minmax(420px,2fr)_200px_200px_200px]";
 
   return (
     <div className="space-y-6">
@@ -326,7 +358,6 @@ export default function StockReceiptApprovalPage() {
               <div className="px-3 text-left" />
               <div className="px-3 text-left">Tanım</div>
               <div className="px-3 text-left">Barkod</div>
-              <div className="px-3 text-left">Alan</div>
               <div className="px-3 text-left">Depo</div>
               <div className="px-3 text-left">Lokasyon</div>
             </div>
@@ -367,13 +398,31 @@ export default function StockReceiptApprovalPage() {
                         <Link
                           to={`/details/${r.kind}/${r.id}`}
                           className="block max-w-full text-left text-sm text-brand-600 hover:underline underline-offset-2 dark:text-brand-400"
-                          title={`${r.kind === "component" ? "Komponent" : "Ürün"
-                            } detayını aç`}
+                          title={`${r.kind === "component" ? "Komponent" : "Ürün"} detayını aç`}
                         >
                           <span className="block overflow-hidden break-words whitespace-normal leading-snug line-clamp-2">
                             {r.master?.display_label || "(Tanım Yok)"} #{r.id}
                           </span>
                         </Link>
+
+                        {/* alt bilgiler */}
+                        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+                          <span>
+                            <span className="text-gray-400">Alan:</span> {fmtArea(r)}
+                          </span>
+
+                          <span>
+                            <span className="text-gray-400">Kod:</span>{" "}
+                            {r.kind === "component" ? (r.master?.bimeks_code || "—") : "—"}
+                          </span>
+
+                          <span>
+                            <span className="text-gray-400">En/Boy:</span>{" "}
+                            {r.kind === "component" && typeof r.width === "number" && typeof r.height === "number"
+                              ? `${nf.format(r.width)} × ${nf.format(r.height)}`
+                              : "—"}
+                          </span>
+                        </div>
                       </div>
 
                       <div className="px-3">
@@ -392,8 +441,8 @@ export default function StockReceiptApprovalPage() {
                             }
                             placeholder="Barkod"
                             className={`pr-10 ${okBarcode || !r.barcode
-                                ? ""
-                                : "border-error-500 focus:ring-error-500"
+                              ? ""
+                              : "border-error-500 focus:ring-error-500"
                               }`}
                           />
                           <button
@@ -427,13 +476,6 @@ export default function StockReceiptApprovalPage() {
                           </div>
                         )}
                       </div>
-
-                      <div className="px-3">
-                        <span className="text-sm text-gray-800 dark:text-gray-100">
-                          {fmtArea(r)}
-                        </span>
-                      </div>
-
                       <div className="px-3">
                         <Select
                           className="w-full"
@@ -534,6 +576,14 @@ export default function StockReceiptApprovalPage() {
                       <div className="mt-1 text-xs text-gray-500">
                         Alan: {fmtArea(r)}
                       </div>
+                      <div className="mt-1 text-xs text-gray-500">
+                        Kod: {r.kind === "component" ? (r.master?.bimeks_code || "—") : "—"}
+                      </div>
+                      <div className="mt-1 text-xs text-gray-500">
+                        En/Boy: {r.kind === "component" && typeof r.width === "number" && typeof r.height === "number"
+                          ? `${nf.format(r.width)} × ${nf.format(r.height)}`
+                          : "—"}
+                      </div>
                     </div>
                   </div>
 
@@ -556,8 +606,8 @@ export default function StockReceiptApprovalPage() {
                           }
                           placeholder="Barkod"
                           className={`pr-10 ${okBarcode || !r.barcode
-                              ? ""
-                              : "border-error-500 focus:ring-error-500"
+                            ? ""
+                            : "border-error-500 focus:ring-error-500"
                             }`}
                         />
                         <button
@@ -645,7 +695,15 @@ export default function StockReceiptApprovalPage() {
           )}
         </div>
 
-        <div className="mt-6 flex justify-end">
+        <div className="mt-6 flex justify-end gap-3">
+          <Button
+            variant="outline"
+            onClick={handleDeleteSelected}
+            disabled={loading || selectedIds.size === 0}
+          >
+            Seçilenleri Sil
+          </Button>
+
           <Button
             variant="primary"
             onClick={handleApproveSelected}

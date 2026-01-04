@@ -15,6 +15,7 @@ const UNIT_LABEL_MAP: Record<string, string> = {
   unit: "unit (EA)",
   weight: "weight (kg)",
   area: "area (m²)",
+  box_unit: "box unit (ea)"
 };
 
 function toNumberSafe(v: any) {
@@ -48,7 +49,7 @@ function exportToExcel(rows: Row[]) {
     "Liner Renk": r.liner_color_name ?? "",
     "Liner Türü": r.liner_type_name ?? "",
     "Yapışkan Türü": r.adhesive_type_name ?? "",
-    "Kalınlık": r.thickness ?? "",
+    "Kalınlık (mm)": r.thickness ?? "",
     "Taşıyıcı Yoğunluk": r.carrier_density ?? "",
 
     // ✅ Tarihler (UI gibi)
@@ -75,7 +76,7 @@ type Row = {
   id: number;
   bimeks_code: string | null;
   bimeks_product_name: string | null;
-  stock_unit?: "area" | "weight" | "length" | "unit" | null;
+  stock_unit?: "area" | "weight" | "length" | "unit" |"box_unit" | null;
   total_count?: number | string | null; // ✅ toplam adet
   total_qty?: number | string | null;   // ✅ toplam miktar
   product_type_id: number;
@@ -120,6 +121,7 @@ export default function MasterListPage() {
     if (u === "weight") return "Ağırlık (kg)";
     if (u === "length") return "Uzunluk (m)";
     if (u === "unit") return "Adet";
+    if (u === "box_unit") return "Koli İçi Adet";
     return "—";
   };
 
@@ -128,6 +130,7 @@ export default function MasterListPage() {
     if (u === "weight") return "kg";
     if (u === "length") return "m";
     if (u === "unit") return "EA";
+    if (u === "box_unit") return "ea";
     return "";
   };
 
@@ -311,7 +314,7 @@ export default function MasterListPage() {
                   Yapışkan Türü
                 </th>
                 <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
-                  Kalınlık
+                  Kalınlık (mm)
                 </th>
                 <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
                   Taşıyıcı Yoğunluk

@@ -15,7 +15,7 @@ type StockUnit = "area" | "weight" | "length" | "unit" | string;
 type Row = {
   id: number;
   barcode: string;
-
+  entry_type?: "Count" | "Purchase" | string | null;
   status?: string | null;
 
   warehouse?: { id: number; name: string };
@@ -34,6 +34,7 @@ type Row = {
 
   weight?: number | null;
   length?: number | null;
+  box_unit?: number | null; // ✅ components.box_unit
 
   created_by?: number | null;
   approved_by?: number | null;
@@ -51,6 +52,14 @@ type Row = {
 
 const dash = <span className="text-gray-400 dark:text-gray-500">—</span>;
 
+const entryTypeLabel = (v?: string | null) => {
+  const x = (v || "").toString().trim().toLowerCase();
+  if (x === "count") return "Sayım";
+  if (x === "purchase") return "Satın Alma";
+  return "—";
+};
+
+
 function normalizeUnit(u?: string | null): string {
   return (u || "").toString().trim().toLowerCase();
 }
@@ -64,18 +73,21 @@ function exportToExcel(rows: Row[]) {
     const alan = unit === "area" ? r.area ?? "" : "";
     const uzunluk = unit === "length" ? r.length ?? "" : "";
     const agirlik = unit === "weight" ? r.weight ?? "" : "";
+    const koliIciAdet = unit === "box_unit" ? r.box_unit ?? "" : "";
 
     return {
       Tip: "Komponent",
       Barkod: r.barcode,
       "Tanım": r.master?.bimeks_product_name ?? "",
       "Bimeks Kodu": r.master?.bimeks_code ?? "",
+      "Giriş Tipi": entryTypeLabel(r.entry_type) === "—" ? "" : entryTypeLabel(r.entry_type),
       "Birim": unit || "",
       En: en,
       Boy: boy,
       Alan: alan,
       Uzunluk: uzunluk,
       "Ağırlık": agirlik,
+      "Koli İçi Adet": koliIciAdet,
       Depo: r.warehouse?.name ?? "",
       Lokasyon: r.location?.name ?? "",
       "Fatura No": r.invoice_no ?? "",
@@ -102,6 +114,7 @@ export default function ComponentListPage() {
     case "length": return "Uzunluk";
     case "weight": return "Ağırlık";
     case "area": return "Alan";
+    case "box_unit": return "Koli İçi Adet"
     default: return "-";
   }
 };
@@ -176,6 +189,7 @@ export default function ComponentListPage() {
 
   const renderWeight = (r: Row) => (normalizeUnit(r.master?.stock_unit) === "weight" ? (r.weight ?? dash) : dash);
   const renderLength = (r: Row) => (normalizeUnit(r.master?.stock_unit) === "length" ? (r.length ?? dash) : dash);
+  const renderBoxUnit = (r: Row) => (normalizeUnit(r.master?.stock_unit) === "box_unit" ? (r.box_unit ?? dash) : dash);
 
   const renderStatus = (r: Row) => r.status ?? dash;
 
@@ -212,12 +226,14 @@ export default function ComponentListPage() {
                   "Barkod",
                   "Tanım",
                   "Bimeks Kodu",
+                  "Giriş Tipi",
                   "Ölçü Birimi",
                   "En",
                   "Boy",
                   "Alan",
                   "Ağırlık",
                   "Uzunluk",
+                  "Koli İçi Adet",
                   "Durum",
                   "Depo",
                   "Lokasyon",
@@ -239,7 +255,7 @@ export default function ComponentListPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td className="px-4 py-6 text-gray-500 dark:text-gray-400" colSpan={18}>
+                  <td className="px-4 py-6 text-gray-500 dark:text-gray-400" colSpan={20}>
                     Yükleniyor…
                   </td>
                 </tr>
@@ -266,6 +282,7 @@ export default function ComponentListPage() {
                     </td>
 
                     <td className="px-4 py-3 whitespace-nowrap">{r.master?.bimeks_code ? r.master.bimeks_code : dash}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">{entryTypeLabel(r.entry_type)}</td>
                     <td className="px-4 py-3 font-medium">{unitLabel(r.master?.stock_unit)}</td>
 
                     <td className="px-4 py-3">{renderWidth(r)}</td>
@@ -273,6 +290,7 @@ export default function ComponentListPage() {
                     <td className="px-4 py-3">{renderArea(r)}</td>
                     <td className="px-4 py-3">{renderWeight(r)}</td>
                     <td className="px-4 py-3">{renderLength(r)}</td>
+                    <td className="px-4 py-3">{renderBoxUnit(r)}</td>
 
                     <td className="px-4 py-3">{renderStatus(r)}</td>
                     <td className="px-4 py-3">{r.warehouse?.name ?? dash}</td>
@@ -299,7 +317,7 @@ export default function ComponentListPage() {
                 ))
               ) : (
                 <tr>
-                  <td className="px-4 py-6 text-gray-500 dark:text-gray-400" colSpan={18}>
+                  <td className="px-4 py-6 text-gray-500 dark:text-gray-400" colSpan={20}>
                     Kayıt bulunamadı
                   </td>
                 </tr>

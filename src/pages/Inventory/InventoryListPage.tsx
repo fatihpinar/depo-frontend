@@ -11,24 +11,51 @@ import api from "../../services/api";
 import * as XLSX from "xlsx";
 
 function exportToExcel(rows: Row[]) {
-  const data = rows.map((r) => ({
-    Tip: r.item_type === "product" ? "Ürün" : "Komponent",
-    Barkod: r.barcode,
-    Tanım: r.name ?? "",
-    Birim: r.unit ?? "",
-    Miktar: r.quantity ?? "",
-    Depo: r.warehouse_name ?? "",
-    Lokasyon: r.location_name ?? "",
-    Durum: r.status_label ?? "",
-    Güncelleme: r.updated_at ? new Date(r.updated_at).toLocaleString() : "",
-  }));
+  const data = rows.map((r) => {
+    const k = normalizeUnit(r.unit);
+
+    const en =
+      r.item_type === "component" && k === "area" ? (r.width ?? "") : "";
+    const boy =
+      r.item_type === "component" && k === "area" ? (r.height ?? "") : "";
+
+    return {
+      Tip: r.item_type === "product" ? "Ürün" : "Komponent",
+      Barkod: r.barcode,
+      Tanım: r.name ?? "",
+      Birim: r.unit ?? "",
+      En: en,
+      Boy: boy,
+      "Koli İçi Adet": r.item_type === "component" ? (r.box_unit ?? "") : "",
+      Miktar: typeof r.quantity === "number" ? r.quantity : "",
+      Depo: r.warehouse_name ?? "",
+      Lokasyon: r.location_name ?? "",
+      Durum: r.status_label ?? "",
+      Güncelleme: r.updated_at ? new Date(r.updated_at).toLocaleString() : "",
+    };
+  });
+
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(data);
   XLSX.utils.book_append_sheet(wb, ws, "Depo Stok");
   XLSX.writeFile(wb, "depo-stok.xlsx");
 }
 
+
 type ItemType = "product" | "component";
+
+function normalizeUnit(
+  u?: string | null
+): "area" | "weight" | "length" | "unit" | "box_unit" | "" {
+  const x = String(u || "").trim().toLowerCase();
+  if (x === "area") return "area";
+  if (x === "weight") return "weight";
+  if (x === "length") return "length";
+  if (x === "box_unit") return "box_unit";
+  if (x === "unit") return "unit";
+  if (x === "ea") return "unit";
+  return "";
+}
 
 type Row = {
   item_type: ItemType;
@@ -37,6 +64,16 @@ type Row = {
   name: string | null;
   unit: string | null;
   quantity: number;
+
+   // ✅ yeni alanlar
+  width?: number | null;
+  height?: number | null;
+  weight?: number | null;
+  length?: number | null;
+
+  entry_type?: "count" | "purchase" | null;
+  box_unit?: number | null;
+
   status_id: number;
   status_label: string;
   warehouse_id?: number | null;
@@ -165,6 +202,53 @@ export default function InventoryListPage() {
   };
 
   /* ------------ Render helpers ------------ */
+
+  const dash = <span className="text-gray-400 dark:text-gray-500">—</span>;
+
+  const entryTypeLabelTR = (v?: string | null) => {
+    if (v === "count") return "Sayım";
+    if (v === "purchase") return "Satın Alma";
+    return "—";
+  };
+
+  const renderBoxUnit = (r: Row) => {
+  const isBoxUnitComponent =
+    r.item_type === "component" && normalizeUnit(r.unit) === "box_unit";
+
+    if (!isBoxUnitComponent) return dash;
+
+    return r.box_unit ?? dash;
+  };
+  const renderEntryType = (r: Row) => {
+    if (r.item_type !== "component") return dash; // ürünlerde yoksa
+    return entryTypeLabelTR(r.entry_type);
+  };
+
+  const renderWidth = (r: Row) =>
+    r.item_type === "component" && normalizeUnit(r.unit) === "area"
+      ? (r.width ?? dash)
+      : dash;
+
+  const renderHeight = (r: Row) =>
+    r.item_type === "component" && normalizeUnit(r.unit) === "area"
+      ? (r.height ?? dash)
+      : dash;
+
+  const renderArea = (r: Row) => {
+    const isAreaComponent =
+      r.item_type === "component" && normalizeUnit(r.unit) === "area";
+
+    if (!isAreaComponent) return dash;
+
+    const w = Number(r.width);
+    const h = Number(r.height);
+
+    if (!Number.isFinite(w) || !Number.isFinite(h)) return dash;
+
+    const area = w * h;
+    return <span className="whitespace-nowrap">{area}</span>;
+  };
+
   const toDetailsHref = (r: Row) =>
     r.item_type === "product"
       ? `/details/product/${r.item_id}`
@@ -177,23 +261,13 @@ export default function InventoryListPage() {
       <span className="text-gray-400 dark:text-gray-500">—</span>
     );
 
-      const normalizeUnit = (u?: string | null): "area" | "weight" | "length" | "unit" | "" => {
-    const x = String(u || "").trim().toLowerCase();
-    if (x === "area") return "area";
-    if (x === "weight") return "weight";
-    if (x === "length") return "length";
-    if (x === "unit") return "unit";
-    // bazen BE "EA" falan dönerse yakala:
-    if (x === "ea") return "unit";
-    return "";
-  };
-
   const unitLabelTR = (u?: string | null) => {
     const k = normalizeUnit(u);
-    if (k === "area") return "Alan";
-    if (k === "weight") return "Ağırlık";
-    if (k === "length") return "Uzunluk";
-    if (k === "unit") return "Adet";
+    if (k === "area") return "Alan (m²)";
+    if (k === "weight") return "Ağırlık (kg)";
+    if (k === "length") return "Uzunluk (m)";
+    if (k === "unit") return "Adet (EA)";
+    if (k === "box_unit") return "Koli İçi Adet (ea)";
     return "—";
   };
 
@@ -203,6 +277,7 @@ export default function InventoryListPage() {
     if (k === "weight") return "(kg)";
     if (k === "length") return "(m)";
     if (k === "unit") return "(EA)";
+    if (k === "box_unit") return "(ea)";
     return "";
   };
 
@@ -298,8 +373,13 @@ export default function InventoryListPage() {
                   "Tip",
                   "Barkod",
                   "Tanım",
+                  "Giriş Tipi",
                   "Birim",
                   "Miktar",
+                  "En (m)",
+                  "Boy (m)",
+                  "Alan (m²)",
+                  "Koli İçi Adet (ea)",
                   "Depo",
                   "Lokasyon",
                   "Durum",
@@ -319,7 +399,7 @@ export default function InventoryListPage() {
                 <tr>
                   <td
                     className="px-4 py-6 text-gray-500 dark:text-gray-400"
-                    colSpan={9}
+                    colSpan={14}
                   >
                     Yükleniyor…
                   </td>
@@ -357,42 +437,29 @@ export default function InventoryListPage() {
                         </span>
                       )}
                     </td>
+                    <td className="px-4 py-3">{renderEntryType(r)}</td>
+                    {/* 5) Birim */}
                     <td className="px-4 py-3">
-                      {unitLabelTR(r.unit) !== "—" ? (
-                        unitLabelTR(r.unit)
-                      ) : (
-                        <span className="text-gray-400 dark:text-gray-500">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {typeof r.quantity === "number" ? (
-                        fmtQtyWithUnit(r)
-                      ) : (
-                        <span className="text-gray-400 dark:text-gray-500">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {r.warehouse_name ?? (
-                        <span className="text-gray-400 dark:text-gray-500">
-                          —
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {r.location_name ?? (
-                        <span className="text-gray-400 dark:text-gray-500">
-                          —
-                        </span>
-                      )}
+                      {unitLabelTR(r.unit) !== "—" ? unitLabelTR(r.unit) : dash}
                     </td>
 
+                    {/* 6) Miktar */}
                     <td className="px-4 py-3">
-                      {r.status_label ?? (
-                        <span className="text-gray-400 dark:text-gray-500">
-                          —
-                        </span>
-                      )}
+                      {typeof r.quantity === "number" ? fmtQtyWithUnit(r) : dash}
                     </td>
+
+                    {/* 7-9) En/Boy/Alan */}
+                    <td className="px-4 py-3">{renderWidth(r)}</td>
+                    <td className="px-4 py-3">{renderHeight(r)}</td>
+                    <td className="px-4 py-3">{renderArea(r)}</td>
+
+                    {/* 10) Koli İçi Adet */}
+                    <td className="px-4 py-3">{renderBoxUnit(r)}</td>
+
+                    {/* 11-14) Depo/Lokasyon/Durum/Güncelleme */}
+                    <td className="px-4 py-3">{r.warehouse_name ?? dash}</td>
+                    <td className="px-4 py-3">{r.location_name ?? dash}</td>
+                    <td className="px-4 py-3">{r.status_label ?? dash}</td>
                     <td className="px-4 py-3">{prettyDate(r.updated_at)}</td>
                   </tr>
                 ))
@@ -400,7 +467,7 @@ export default function InventoryListPage() {
                 <tr>
                   <td
                     className="px-4 py-6 text-gray-500 dark:text-gray-400"
-                    colSpan={9}
+                    colSpan={14}
                   >
                     Kayıt bulunamadı
                   </td>

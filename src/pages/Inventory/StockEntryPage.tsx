@@ -43,9 +43,9 @@ interface Location {
   warehouse_id: number;
 }
 
-type StockUnit = "area" | "weight" | "length" | "unit";
-type ThicknessUnit = "um" | "m";
-
+type StockUnit = "area" | "weight" | "length" | "unit" | "box_unit";
+type ThicknessUnit = "um" | "mm";
+type DimUnit = "m" | "mm";
 
 interface Master {
   id: number;
@@ -56,8 +56,6 @@ interface Master {
   bimeks_code?: string;
   bimeks_product_name?: string;
 
-  // length_unit yerine:
-  thickness_unit?: ThicknessUnit;
   stock_unit?: StockUnit;
 
   supplier_id?: number;
@@ -65,29 +63,34 @@ interface Master {
   supplier_product_code?: string;
 }
 
+type EntryType = "count" | "purchase"; // sayım | satın alma
 
 interface Row {
   id: string;
   master_id: number;
   display_label: string;
-  qty: number;
+  qty: number | "";
 
   width?: string;
   height?: string;
-  weight?: string;   // 🔹 yeni
-  length?: string;   // 🔹 yeni
+  height_unit?: DimUnit;
+  weight?: string;
+  length?: string;
+  box_unit?: string;
 
   warehouse_id?: string;
   location_id?: string;
   invoice_no?: string;
 
-  thickness_unit?: ThicknessUnit;
-  stock_unit?: StockUnit;  // 🔹 satırda master'ın stok birimi
+  // ✅ yeni alanlar
+  entry_type?: EntryType;
+  supplier_barcode_no?: string;
+
+  stock_unit?: StockUnit;
 
   bimeks_code?: string;
   bimeks_product_name?: string;
 }
-
 
 
 interface AlertState {
@@ -97,7 +100,9 @@ interface AlertState {
 }
 
 interface GlobalSettings {
+  entry_type: EntryType;          // ✅ yeni
   invoice: string;
+  supplier_barcode_no: string;    // ✅ yeni
   warehouse: string;
   location: string;
 }
@@ -133,7 +138,13 @@ function MasterInlineForm({ onSaved, onCancel }: MasterInlineFormProps) {
   const [linerTypes, setLinerTypes] = useState<SimpleLookup[]>([]);
   const [adhesiveTypes, setAdhesiveTypes] = useState<SimpleLookup[]>([]);
 // Yeni (lengthUnit'i kalınlık birimi olarak kullanıyoruz)
-  const [lengthUnit, setLengthUnit] = useState<ThicknessUnit>("m");
+  const [lengthUnit, setLengthUnit] = useState<ThicknessUnit>("um");
+
+  const toMmThickness = (val: string, unit: ThicknessUnit) => {
+  const n = Number(val);
+    if (!Number.isFinite(n)) return null;
+    return unit === "um" ? n / 1000 : n;
+  };
 
   // + yeni stok birimi state'i:
   const [stockUnit, setStockUnit] = useState<StockUnit>("area");
@@ -143,6 +154,7 @@ function MasterInlineForm({ onSaved, onCancel }: MasterInlineFormProps) {
     createSelectOption("weight", "Ağırlık (kg)"),
     createSelectOption("length", "Uzunluk (m)"),
     createSelectOption("unit", "Adet (EA)"),  // 🔹 yeni
+    createSelectOption("box_unit", "Koli İçi Adet"),
   ];
 
   // Form values
@@ -287,8 +299,9 @@ function MasterInlineForm({ onSaved, onCancel }: MasterInlineFormProps) {
 
   const thicknessUnitOptions = [
     createSelectOption("um", "Mikron (µm)"),
-    createSelectOption("m", "Metre (m)"),
+    createSelectOption("mm", "Milimetre (mm)"),
   ];
+
 
   // ----- ON CHANGE HANDLERS -----
   const handleSupplierChange = (val: string) => {
@@ -557,7 +570,7 @@ function MasterInlineForm({ onSaved, onCancel }: MasterInlineFormProps) {
         adhesive_type_id: finalAdhesiveTypeId,
 
         // Kalınlık + birimi
-        thickness: thickness ? Number(thickness) : null,
+        thickness: thickness ? toMmThickness(thickness, lengthUnit) : null,
         thickness_unit: lengthUnit,        // yeni alan
 
         // Stok birimi (alan / ağırlık)
@@ -857,7 +870,7 @@ function MasterInlineForm({ onSaved, onCancel }: MasterInlineFormProps) {
             options={stockUnitOptions}
             value={stockUnit}
             onChange={(v: string) => setStockUnit(v as StockUnit)}
-            placeholder="Alan (m²) / Ağırlık (kg) / Uzunluk (m) / Adet (EA)"
+            placeholder="Alan (m²) / Ağırlık (kg) / Uzunluk (m) / Adet (EA) / Koli İçi Adet"
           />
         </div>
       </div>
@@ -873,13 +886,13 @@ function MasterInlineForm({ onSaved, onCancel }: MasterInlineFormProps) {
               className="w-full"
               value={thickness}
               onChange={(e) => setThickness(e.target.value)}
-              placeholder={lengthUnit === "m" ? "metre" : "µm"}
+              placeholder={lengthUnit === "mm" ? "mm" : "µm"}
             />
             <Select
               options={thicknessUnitOptions}
               value={lengthUnit}
               onChange={(v: string) => setLengthUnit(v as ThicknessUnit)}
-              placeholder="m / µm"
+              placeholder="mm / µm"
             />
           </div>
         </div>
@@ -968,16 +981,27 @@ function StockRow({
   onDelete,
   ensureLocations,
 }: StockRowProps) {
-  const locationOptions = useMemo(() => {      
-    const wh = row.warehouse_id || "";
-    const locations = wh ? locationsByWarehouse[Number(wh)] || [] : [];
-    return locations.map((l) => createSelectOption(l.id, l.name));
-  }, [row.warehouse_id, locationsByWarehouse]);
+  // ✅ bunlar JSX'te kullanılacağı için en üst scope'ta olmalı
+  const entryTypeOptions = useMemo(
+    () => [
+      createSelectOption("count", "Sayım"),
+      createSelectOption("purchase", "Satın Alma"),
+    ],
+    []
+  );
 
   const stockUnit = row.stock_unit || "area";
   const isArea = stockUnit === "area";
   const isWeight = stockUnit === "weight";
   const isLength = stockUnit === "length";
+  const isBoxUnit = stockUnit === "box_unit";
+
+  // ✅ sadece lokasyon option üretmeli
+  const locationOptions = useMemo(() => {
+    const wh = row.warehouse_id || "";
+    const locations = wh ? locationsByWarehouse[Number(wh)] || [] : [];
+    return locations.map((l) => createSelectOption(l.id, l.name));
+  }, [row.warehouse_id, locationsByWarehouse]);
 
   const handleWarehouseChange = async (val: string) => {
     const locs = await ensureLocations(val);
@@ -988,7 +1012,7 @@ function StockRow({
   };
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800 p-4">
+    <div className="rounded-lg border border-gray-200 bg-gray-50 shadow-sm dark:border-gray-700 dark:bg-gray-900/40 p-4">
       {/* Mobile: Card Layout */}
       <div className="block md:hidden">
         <div className="mb-3 flex items-center justify-between gap-2">
@@ -1010,68 +1034,129 @@ function StockRow({
               )}
             </div>
           </div>
+
           <div className="flex gap-2">
             <Button
               variant="outline"
               className="h-8 w-8 p-0"
               onClick={() => onClone(row.id)}
             >
-              <span title="Klonla" aria-hidden>
-                +
-              </span>
+              <span title="Klonla" aria-hidden>+</span>
               <span className="sr-only">Klonla</span>
             </Button>
+
             <Button
               variant="outline"
               className="h-8 w-8 p-0"
               onClick={() => onDelete(row.id)}
             >
-              <span title="Sil" aria-hidden>
-                -
-              </span>
+              <span title="Sil" aria-hidden>-</span>
               <span className="sr-only">Sil</span>
             </Button>
           </div>
         </div>
 
         <div className="space-y-3">
-          <div className="grid grid-cols-3 gap-2">
+          {/* 1. satır: Adet, Giriş Tipi */}
+          <div className="grid grid-cols-2 gap-2">
             <div>
               <Label>Adet</Label>
               <Input
                 type="number"
                 min="1"
                 value={String(row.qty)}
-                onChange={(e) =>
-                  onUpdate(row.id, {
-                    qty: Math.max(1, parseInt(e.target.value || "1", 10)),
-                  })
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "") return;
+                  const n = parseInt(v, 10);
+                  onUpdate(row.id, { qty: Math.max(1, isNaN(n) ? 1 : n) });
+                }}
+              />
+            </div>
+
+            <div>
+              <Label>Giriş Tipi</Label>
+              <Select
+                options={entryTypeOptions}
+                value={row.entry_type || "count"}
+                placeholder="Seçiniz"
+                onChange={(v: string) =>
+                  onUpdate(row.id, { entry_type: v as EntryType })
                 }
               />
             </div>
+          </div>
+
+          {/* 2. satır: Fatura No, Tedarikçi Barkod No */}
+          <div className="grid grid-cols-2 gap-2">
             <div>
-              <Label>En (m)</Label>
+              <Label>Fatura No</Label>
+              <Input
+                type="text"
+                value={row.invoice_no || ""}
+                onChange={(e) => onUpdate(row.id, { invoice_no: e.target.value })}
+                placeholder="Opsiyonel"
+              />
+            </div>
+
+            <div>
+              <Label>Tedarikçi Barkod No</Label>
+              <Input
+                type="text"
+                value={row.supplier_barcode_no || ""}
+                onChange={(e) =>
+                  onUpdate(row.id, { supplier_barcode_no: e.target.value })
+                }
+                placeholder="Opsiyonel"
+              />
+            </div>
+          </div>
+
+          {/* 3. satır: En, Boy, Ölçü Birimi */}
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <Label>En (mm)</Label>
               <Input
                 type="number"
                 min="0"
+                step="1"
                 value={row.width || ""}
                 onChange={(e) => onUpdate(row.id, { width: e.target.value })}
                 disabled={!isArea}
+                placeholder="En (mm)"
               />
             </div>
+
             <div>
-              <Label>Boy (m)</Label>
+              <Label>{row.height_unit === "mm" ? "Boy (mm)" : "Boy (m)"}</Label>
               <Input
                 type="number"
                 min="0"
+                step={row.height_unit === "mm" ? "1" : "0.01"}
                 value={row.height || ""}
                 onChange={(e) => onUpdate(row.id, { height: e.target.value })}
                 disabled={!isArea}
               />
             </div>
+
+            <div>
+              <Label>Ölçü Birimi</Label>
+              <Select
+                options={[
+                  createSelectOption("m", "m"),
+                  createSelectOption("mm", "mm"),
+                ]}
+                value={row.height_unit || "m"}
+                placeholder="m"
+                onChange={(v: string) =>
+                  onUpdate(row.id, { height_unit: v as DimUnit })
+                }
+              />
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          {/* 4. satır: Ağırlık, Uzunluk, Koli içi adet */}
+          <div className="grid grid-cols-3 gap-2">
             <div>
               <Label>Ağırlık (kg)</Label>
               <Input
@@ -1082,6 +1167,7 @@ function StockRow({
                 disabled={!isWeight}
               />
             </div>
+
             <div>
               <Label>Uzunluk (m)</Label>
               <Input
@@ -1092,14 +1178,28 @@ function StockRow({
                 disabled={!isLength}
               />
             </div>
+
+            <div>
+              <Label>Koli İçi Adet</Label>
+              <Input
+                type="number"
+                min="0"
+                step="1"
+                value={row.box_unit || ""}
+                onChange={(e) => onUpdate(row.id, { box_unit: e.target.value })}
+                disabled={!isBoxUnit}
+                placeholder="Adet"
+              />
+            </div>
           </div>
 
+          {/* 5. satır: Depo, Lokasyon */}
           <div>
             <Label>Depo</Label>
             <Select
               options={warehouseOptions}
               value={row.warehouse_id || ""}
-              placeholder="Depo Seçiniz"
+              placeholder="Depo"
               onChange={handleWarehouseChange}
             />
           </div>
@@ -1109,151 +1209,194 @@ function StockRow({
             <Select
               options={locationOptions}
               value={row.location_id || ""}
-              placeholder="Lokasyon Seçiniz"
-              onChange={(val: string) =>
-                onUpdate(row.id, { location_id: val })
-              }
-            />
-          </div>
-
-          <div>
-            <Label>Fatura No</Label>
-            <Input
-              type="text"
-              value={row.invoice_no || ""}
-              onChange={(e) =>
-                onUpdate(row.id, { invoice_no: e.target.value })
-              }
-              placeholder="Opsiyonel"
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Desktop: 6 kolonlu Excel düzeni */}
-      <div className="hidden md:block">
-        <div className="space-y-2">
-          {/* Satır 1: ÜRÜN ADI | ADET | EN | BOY | DEPO | + */}
-          <div className="grid grid-cols-[2.5fr_1fr_1fr_1fr_1.5fr_auto] gap-2 items-center">
-            {/* Kolon 1: Bimeks Ürün Adı */}
-            <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate" title={row.bimeks_product_name || row.display_label}>
-              {row.bimeks_product_name || row.display_label}
-            </div>
-            
-            {/* Kolon 2: Adet */}
-            <div className="relative">
-              <Input
-                type="number"
-                min="1"
-                value={String(row.qty)}
-                onChange={(e) =>
-                  onUpdate(row.id, {
-                    qty: Math.max(1, parseInt(e.target.value || "1", 10)),
-                  })
-                }
-                className="pr-8"
-              />
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400 pointer-events-none">
-                Ad.
-              </span>
-            </div>
-            
-            {/* Kolon 3: En */}
-            <Input
-              type="number"
-              min="0"
-              step="0.01"
-              value={row.width || ""}
-              onChange={(e) => onUpdate(row.id, { width: e.target.value })}
-              placeholder="En (m)"
-              disabled={!isArea}
-            />
-            
-            {/* Kolon 4: Boy */}
-            <Input
-              type="number"
-              min="0"
-              step="0.01"
-              value={row.height || ""}
-              onChange={(e) => onUpdate(row.id, { height: e.target.value })}
-              placeholder="Boy (m)"
-              disabled={!isArea}
-            />
-            
-            {/* Kolon 5: Depo */}
-            <Select
-              options={warehouseOptions}
-              value={row.warehouse_id || ""}
-              placeholder="Depo Seçiniz"
-              onChange={handleWarehouseChange}
-            />
-            
-            {/* Kolon 6: + Butonu */}
-            <Button
-              variant="outline"
-              className="h-10 w-10 p-0"
-              onClick={() => onClone(row.id)}
-            >
-              <span aria-hidden>+</span>
-            </Button>
-          </div>
-
-          {/* Satır 2: ÜRÜN KODU | FATURA NO | AĞIRLIK | UZUNLUK | LOKASYON | - */}
-          <div className="grid grid-cols-[2.5fr_1fr_1fr_1fr_1.5fr_auto] gap-2 items-center">
-            {/* Kolon 1: Bimeks Kodu */}
-            <div className="text-sm font-medium text-gray-600 dark:text-gray-400 truncate" title={row.bimeks_code || ""}>
-              {row.bimeks_code || "-"}
-            </div>
-            
-            {/* Kolon 2: Fatura No */}
-            <Input
-              type="text"
-              value={row.invoice_no || ""}
-              onChange={(e) => onUpdate(row.id, { invoice_no: e.target.value })}
-              placeholder="Fatura No"
-            />
-            
-            {/* Kolon 3: Ağırlık */}
-            <Input
-              type="number"
-              min="0"
-              step="0.01"
-              value={row.weight || ""}
-              onChange={(e) => onUpdate(row.id, { weight: e.target.value })}
-              placeholder="Ağırlık (kg)"
-              disabled={!isWeight}
-            />
-            
-            {/* Kolon 4: Uzunluk */}
-            <Input
-              type="number"
-              min="0"
-              step="0.01"
-              value={row.length || ""}
-              onChange={(e) => onUpdate(row.id, { length: e.target.value })}
-              placeholder="Uzunluk (m)"
-              disabled={!isLength}
-            />
-            
-            {/* Kolon 5: Lokasyon */}
-            <Select
-              options={locationOptions}
-              value={row.location_id || ""}
-              placeholder="Lokasyon Seçiniz"
+              placeholder="Lokasyon"
               onChange={(val: string) => onUpdate(row.id, { location_id: val })}
             />
-            
-            {/* Kolon 6: - Butonu */}
-            <Button
-              variant="outline"
-              className="h-10 w-10 p-0"
-              onClick={() => onDelete(row.id)}
-            >
-              <span aria-hidden>-</span>
-            </Button>
           </div>
         </div>
       </div>
+
+      {/* DESKTOP */}
+      <div className="hidden md:block">
+        {/* OUTER GRID: sol | orta | sağ */}
+        <div className="grid grid-cols-[minmax(0,3fr)_minmax(0,7fr)_auto] gap-2">
+          {/* SOL: 2 satır — üst: tanım, alt: bimeks kodu (orta ile birebir hizalı) */}
+          <div className="grid grid-rows-2 gap-2">
+            {/* ÜST SATIR */}
+            <div
+              className="h-10 flex items-center text-sm font-medium text-gray-900 dark:text-gray-100 truncate"
+              title={row.bimeks_product_name || row.display_label}
+            >
+              {row.bimeks_product_name || row.display_label}
+            </div>
+
+            {/* ALT SATIR */}
+            <div
+              className="h-10 flex items-center text-sm font-medium text-gray-600 dark:text-gray-400 truncate"
+              title={row.bimeks_code || ""}
+            >
+              {row.bimeks_code || "-"}
+            </div>
+          </div>
+
+          {/* ORTA: Üst satır (5 eşit) + Alt satır (7 eşit) */}
+          <div className="grid grid-rows-2 gap-2">
+            {/* ÜST SATIR: 5 eşit kutu */}
+            <div className="grid grid-cols-5 gap-2 items-center">
+              <Select
+                options={entryTypeOptions}
+                value={row.entry_type || "count"}
+                placeholder="Seçiniz"
+                onChange={(v: string) =>
+                  onUpdate(row.id, { entry_type: v as EntryType })
+                }
+              />
+
+              <Input
+                type="text"
+                value={row.invoice_no || ""}
+                onChange={(e) => onUpdate(row.id, { invoice_no: e.target.value })}
+                placeholder="Fatura No"
+              />
+
+              <Input
+                type="text"
+                value={row.supplier_barcode_no || ""}
+                onChange={(e) =>
+                  onUpdate(row.id, { supplier_barcode_no: e.target.value })
+                }
+                placeholder="Tedarikçi Barkod No"
+              />
+
+              <Select
+                options={warehouseOptions}
+                value={row.warehouse_id || ""}
+                placeholder="Depo"
+                onChange={handleWarehouseChange}
+              />
+
+              <Select
+                options={locationOptions}
+                value={row.location_id || ""}
+                placeholder="Lokasyon"
+                onChange={(val: string) => onUpdate(row.id, { location_id: val })}
+              />
+            </div>
+
+            {/* ALT SATIR: 7 eşit kutu */}
+            <div className="grid grid-cols-7 gap-2 items-center">
+              <div className="relative">
+                <Input
+                  type="number"
+                  min="1"
+                  value={row.qty === "" ? "" : String(row.qty)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === "") {
+                      onUpdate(row.id, { qty: "" });
+                      return;
+                    }
+                    const n = parseInt(v, 10);
+                    onUpdate(row.id, { qty: Math.max(1, Number.isNaN(n) ? 1 : n) });
+                  }}
+                  onBlur={() => {
+                    if (row.qty === "") onUpdate(row.id, { qty: 1 });
+                  }}
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400 pointer-events-none">
+                  Ad.
+                </span>
+              </div>
+
+              <Input
+                type="number"
+                min="0"
+                step="1"
+                value={row.width || ""}
+                onChange={(e) => onUpdate(row.id, { width: e.target.value })}
+                placeholder="En (mm)"
+                disabled={!isArea}
+              />
+
+              <Input
+                type="number"
+                min="0"
+                step={row.height_unit === "mm" ? "1" : "0.01"}
+                value={row.height || ""}
+                onChange={(e) => onUpdate(row.id, { height: e.target.value })}
+                placeholder={row.height_unit === "mm" ? "Boy (mm)" : "Boy (m)"}
+                disabled={!isArea}
+              />
+
+              <Select
+                options={[
+                  createSelectOption("m", "m"),
+                  createSelectOption("mm", "mm"),
+                ]}
+                value={row.height_unit || "m"}
+                placeholder="m"
+                onChange={(v: string) => onUpdate(row.id, { height_unit: v as DimUnit })}
+              />
+
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={row.weight || ""}
+                onChange={(e) => onUpdate(row.id, { weight: e.target.value })}
+                placeholder="Kg"
+                disabled={!isWeight}
+              />
+
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={row.length || ""}
+                onChange={(e) => onUpdate(row.id, { length: e.target.value })}
+                placeholder="Uzunluk"
+                disabled={!isLength}
+              />
+
+              <Input
+                type="number"
+                min="0"
+                step="1"
+                value={row.box_unit || ""}
+                onChange={(e) => onUpdate(row.id, { box_unit: e.target.value })}
+                placeholder="Koli içi Adet"
+                disabled={!isBoxUnit}
+              />
+            </div>
+          </div>
+
+          {/* SAĞ: 2 satır — üst: +, alt: - (orta ile birebir hizalı) */}
+          <div className="grid grid-rows-2 gap-2">
+            {/* ÜST SATIR: + */}
+            <div className="h-10 flex items-center justify-end">
+              <Button
+                variant="outline"
+                className="h-10 w-10 p-0"
+                onClick={() => onClone(row.id)}
+              >
+                <span aria-hidden>+</span>
+              </Button>
+            </div>
+
+            {/* ALT SATIR: - */}
+            <div className="h-10 flex items-center justify-end">
+              <Button
+                variant="outline"
+                className="h-10 w-10 p-0"
+                onClick={() => onDelete(row.id)}
+              >
+                <span aria-hidden>-</span>
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+
     </div>
   );
 }
@@ -1288,10 +1431,13 @@ export default function StockEntryPage() {
   // Rows & Global Settings
   const [rows, setRows] = useState<Row[]>([]);
   const [globalSettings, setGlobalSettings] = useState<GlobalSettings>({
-    invoice: "",
-    warehouse: "",
-    location: "",
-  });
+  entry_type: "purchase",       // default: satın alma (istersen "count" yap)
+  invoice: "",
+  supplier_barcode_no: "",
+  warehouse: "",
+  location: "",
+});
+
 
   // UI State
   const [uiAlert, setUiAlert] = useState<AlertState | null>(null);
@@ -1415,12 +1561,14 @@ export default function StockEntryPage() {
       const name = (m.bimeks_product_name ?? "").toLowerCase();
       const supplier = (m.supplier_name ?? "").toLowerCase();
       const code = (m.bimeks_code ?? "").toLowerCase();
+      const supplierCode = (m.supplier_product_code ?? "").toLowerCase(); // ✅ ek
 
       return (
         label.includes(term) ||
         name.includes(term) ||
         supplier.includes(term) ||
-        code.includes(term)
+        code.includes(term) ||
+        supplierCode.includes(term) // ✅ ek
       );
     });
   }, [filteredMasters, masterSearch, supplierFilterId]);
@@ -1446,7 +1594,7 @@ export default function StockEntryPage() {
 
   const isStockSaveEnabled =
     rows.length > 0 &&
-    rows.every((r) => Number(r.qty) >= 1 && r.warehouse_id && r.location_id);
+    rows.every((r) => Number(r.qty || 0) >= 1 && r.warehouse_id && r.location_id);
 
   // Handlers
   const ensureLocations = useCallback(
@@ -1488,26 +1636,31 @@ export default function StockEntryPage() {
   const display = code || name;
 
   return {
-      id: uid(),
-      master_id: master.id,
-      display_label: display,
-      qty: 1,
+    id: uid(),
+    master_id: master.id,
+    display_label: display,
+    qty: 1,
 
-      width: "",
-      height: "",
-      weight: "",    // 🔹 yeni
-      length: "",    // 🔹 yeni
+    width: "",
+    height: "",
+    height_unit: "m",
+    weight: "",
+    length: "",
+    box_unit: "",
 
-      warehouse_id: "",
-      location_id: "",
-      invoice_no: globalSettings.invoice || "",
+    warehouse_id: "",
+    location_id: "",
+    invoice_no: globalSettings.invoice || "",
 
-      thickness_unit: master.thickness_unit as ThicknessUnit | undefined,
-      stock_unit: master.stock_unit as StockUnit | undefined, // 🔹 master’dan miras
+    // ✅ yeni
+    entry_type: globalSettings.entry_type || "purchase",
+    supplier_barcode_no: globalSettings.supplier_barcode_no || "",
 
-      bimeks_code: code,
-      bimeks_product_name: name,
-    };
+    stock_unit: master.stock_unit as StockUnit | undefined,
+
+    bimeks_code: code,
+    bimeks_product_name: name,
+  };
   });
 
     const mastersToKeep = new Set(selectedMasterIds);
@@ -1558,147 +1711,155 @@ export default function StockEntryPage() {
   }, []);
 
   const applyGlobalsToAll = useCallback(async () => {
-    let nextRows = [...rows];
+  let nextRows = [...rows];
 
-    if (globalSettings.warehouse) {
-      const locs = await ensureLocations(globalSettings.warehouse);
-      const firstLocId =
-        globalSettings.location || String(locs[0]?.id || "");
-
-      nextRows = nextRows.map((r) => ({
-        ...r,
-        warehouse_id: globalSettings.warehouse,
-        location_id: firstLocId,
-      }));
-
-      if (!globalSettings.location) {
-        setGlobalSettings((prev) => ({ ...prev, location: firstLocId }));
-      }
-    }
+  if (globalSettings.warehouse) {
+    const locs = await ensureLocations(globalSettings.warehouse);
+    const firstLocId =
+      globalSettings.location || String(locs[0]?.id || "");
 
     nextRows = nextRows.map((r) => ({
       ...r,
-      invoice_no: globalSettings.invoice,
+      warehouse_id: globalSettings.warehouse,
+      location_id: firstLocId,
     }));
 
-    setRows(nextRows);
-  }, [rows, globalSettings, ensureLocations]);
+    if (!globalSettings.location) {
+      setGlobalSettings((prev) => ({ ...prev, location: firstLocId }));
+    }
+  }
+
+  // ✅ tüm global alanları satıra uygula
+  nextRows = nextRows.map((r) => ({
+    ...r,
+    entry_type: globalSettings.entry_type,
+    invoice_no: globalSettings.invoice,
+    supplier_barcode_no: globalSettings.supplier_barcode_no,
+  }));
+
+  setRows(nextRows);
+}, [rows, globalSettings, ensureLocations]);
+
+  const toNumberOrNull = (s?: string) => {
+    if (s === undefined || s === null || s === "") return null;
+    const n = Number(s);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const mmToM = (mm: number) => mm / 1000;
+
+  const boyToM = (boy: number, unit: DimUnit) => (unit === "mm" ? boy / 1000 : boy);
 
   const handleSave = useCallback(async () => {
-  try {
-    if (!rows.length) {
-      showAlert({
-        variant: "warning",
-        title: "Eksik bilgi",
-        message: "Önce tanım seçip satır oluşturun.",
-      });
-      return;
-    }
-
-    // 🔴 En / boy zorunlu kontrolü
-    // 🔴 Ölçü alanları zorunlu kontrolü (stok birimine göre)
-    const dimErrors: string[] = [];
-
-    rows.forEach((r, idx) => {
-      const master = mastersRaw.find((m) => m.id === r.master_id);
-      const stockUnit = (master?.stock_unit || "area") as StockUnit;
-
-      const w =
-        r.width !== undefined && r.width !== null && r.width !== ""
-          ? Number(r.width)
-          : NaN;
-
-      const h =
-        r.height !== undefined && r.height !== null && r.height !== ""
-          ? Number(r.height)
-          : NaN;
-
-      const weight =
-        r.weight !== undefined && r.weight !== null && r.weight !== ""
-          ? Number(r.weight)
-          : NaN;
-
-      const length =
-        r.length !== undefined && r.length !== null && r.length !== ""
-          ? Number(r.length)
-          : NaN;
-
-      if (stockUnit === "area") {
-        if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
-          dimErrors.push(String(idx + 1));
-        }
-      } else if (stockUnit === "weight") {
-        if (!Number.isFinite(weight) || weight <= 0) {
-          dimErrors.push(String(idx + 1));
-        }
-      } else if (stockUnit === "length") {
-        if (!Number.isFinite(length) || length <= 0) {
-          dimErrors.push(String(idx + 1));
-        }
-      } else if (stockUnit === "unit") {
-        // Adet birimi → ekstra ölçü zorunluluğu yok, sadece qty>=1 kontrolü yeterli.
-        // Burada dimErrors'a bir şey eklemiyoruz.
-      }
-    });
-
-
-    if (dimErrors.length) {
-      showAlert({
-        variant: "warning",
-        title: "Ölçü alanı eksik veya hatalı",
-        message:
-          "Şu satırlarda stok birimine göre ölçü alanları zorunludur ve 0'dan büyük olmalıdır: " +
-          dimErrors.join(", "),
-      });
-      return;
-    }
-
-
-    const payload: any[] = [];
-    rows.forEach((r) => {
-      const master = mastersRaw.find((m) => m.id === r.master_id);
-      const unit = (master?.default_unit || "EA") as "EA" | "M" | "KG";
-      const stockUnit = (master?.stock_unit || "area") as StockUnit;
-
-      const width =
-        r.width !== undefined && r.width !== null && r.width !== ""
-          ? Number(r.width)
-          : null;
-
-      const height =
-        r.height !== undefined && r.height !== null && r.height !== ""
-          ? Number(r.height)
-          : null;
-
-      const weight =
-        r.weight !== undefined && r.weight !== null && r.weight !== ""
-          ? Number(r.weight)
-          : null;
-
-      const length =
-        r.length !== undefined && r.length !== null && r.length !== ""
-          ? Number(r.length)
-          : null;
-
-      for (let i = 0; i < Number(r.qty); i++) {
-        payload.push({
-          master_id: r.master_id,
-          unit,
-          quantity: 1,
-          warehouse_id: Number(r.warehouse_id),
-          location_id: Number(r.location_id),
-
-          // stok birimine göre sadece gerekli alanları doldur
-          width: stockUnit === "area" ? width : null,
-          height: stockUnit === "area" ? height : null,
-          weight: stockUnit === "weight" ? weight : null,
-          length: stockUnit === "length" ? length : null,
-
-          invoice_no: r.invoice_no?.trim() || null,
+    try {
+      if (!rows.length) {
+        showAlert({
+          variant: "warning",
+          title: "Eksik bilgi",
+          message: "Önce tanım seçip satır oluşturun.",
         });
+        return;
       }
-    });
 
+      // Ölçü alanları zorunlu kontrolü (stok birimine göre)
+      const dimErrors: string[] = [];
+
+      rows.forEach((r, idx) => {
+        const master = mastersRaw.find((m) => m.id === r.master_id);
+        const stockUnit = (master?.stock_unit || r.stock_unit || "area") as StockUnit;
+
+        // Area için: En mm, Boy m/mm
+        const widthMm = toNumberOrNull(r.width);
+        const boyRaw = toNumberOrNull(r.height);
+        const boyUnit = (r.height_unit || "m") as DimUnit;
+
+        // Weight / Length
+        const weight = toNumberOrNull(r.weight);
+        const length = toNumberOrNull(r.length);
+
+        if (stockUnit === "area") {
+          if (!widthMm || widthMm <= 0 || !boyRaw || boyRaw <= 0) {
+            dimErrors.push(String(idx + 1));
+          } else {
+            // Dönüşüm sonrası da 0 kontrolü (ek güvenlik)
+            const widthM = mmToM(widthMm);
+            const heightM = boyToM(boyRaw, boyUnit);
+            if (!Number.isFinite(widthM) || !Number.isFinite(heightM) || widthM <= 0 || heightM <= 0) {
+              dimErrors.push(String(idx + 1));
+            }
+          }
+        } else if (stockUnit === "weight") {
+          if (!weight || weight <= 0) dimErrors.push(String(idx + 1));
+        } else if (stockUnit === "length") {
+          if (!length || length <= 0) dimErrors.push(String(idx + 1));
+        } else if (stockUnit === "unit") {
+          // Adet → ekstra ölçü zorunluluğu yok
+        }
+          else if (stockUnit === "box_unit") {
+          const boxQty = toNumberOrNull(r.box_unit);
+          if (!boxQty || boxQty <= 0) dimErrors.push(String(idx + 1));
+        }
+      });
+
+      if (dimErrors.length) {
+        showAlert({
+          variant: "warning",
+          title: "Ölçü alanı eksik veya hatalı",
+          message:
+            "Şu satırlarda stok birimine göre ölçü alanları zorunludur ve 0'dan büyük olmalıdır: " +
+            dimErrors.join(", "),
+        });
+        return;
+      }
+
+      const payload: any[] = [];
+
+      rows.forEach((r) => {
+        const master = mastersRaw.find((m) => m.id === r.master_id);
+
+        const unit = (master?.default_unit || "EA") as "EA" | "M" | "KG";
+        const stockUnit = (master?.stock_unit || r.stock_unit || "area") as StockUnit;
+
+        // Area için dönüşüm
+        const widthMm = toNumberOrNull(r.width);
+        const boyRaw = toNumberOrNull(r.height);
+        const boyUnit = (r.height_unit || "m") as DimUnit;
+
+        const widthM =
+          stockUnit === "area" && widthMm !== null ? mmToM(widthMm) : null;
+
+        const heightM =
+          stockUnit === "area" && boyRaw !== null ? boyToM(boyRaw, boyUnit) : null;
+
+        // Weight / Length
+        const weight = toNumberOrNull(r.weight);
+        const length = toNumberOrNull(r.length);
+        const boxQty = toNumberOrNull(r.box_unit);
+
+        for (let i = 0; i < Number(r.qty || 0); i++) {
+          payload.push({
+            master_id: r.master_id,
+            unit,
+            quantity: 1,
+            warehouse_id: Number(r.warehouse_id),
+            location_id: Number(r.location_id),
+
+            width:  stockUnit === "area" ? widthM : null,
+            height: stockUnit === "area" ? heightM : null,
+            weight: stockUnit === "weight" ? weight : null,
+            length: stockUnit === "length" ? length : null,
+
+            // ✅ yeni: DB kolon adına göre isim
+            box_unit: stockUnit === "box_unit" ? boxQty : null,
+
+            invoice_no: r.invoice_no?.trim() || null,
+
+            // ✅ yeni
+            entry_type: r.entry_type || "count",
+            supplier_barcode_no: r.supplier_barcode_no?.trim() || null,
+          });
+        }
+      });
 
       const res = await api.post("/components/bulk", payload);
 
@@ -1741,6 +1902,7 @@ export default function StockEntryPage() {
     }
   }, [rows, mastersRaw, showAlert]);
 
+
   const handleGlobalWarehouseChange = useCallback(
     async (val: string) => {
       setGlobalSettings((prev) => ({ ...prev, warehouse: val }));
@@ -1765,6 +1927,14 @@ export default function StockEntryPage() {
       ...suppliers.map((s) => createSelectOption(s.id, s.name)),
     ],
     [suppliers]
+  );
+
+  const entryTypeOptions = useMemo(
+    () => [
+      createSelectOption("count", "Sayım"),
+      createSelectOption("purchase", "Satın Alma"),
+    ],
+    []
   );
 
   return (
@@ -1854,7 +2024,7 @@ export default function StockEntryPage() {
                     </Label>
                     <Input
                       type="text"
-                      placeholder="Bimeks kodu veya ad ile ara..."
+                      placeholder="Bimeks kodu, tedarikçi kodu veya ad ile ara..."
                       value={masterSearch}
                       onChange={(e) => setMasterSearch(e.target.value)}
                     />
@@ -1960,43 +2130,77 @@ export default function StockEntryPage() {
         <ComponentCard title="Stok Girişi">
           <div ref={rowsSectionRef} />
 
-          <div className="grid grid-cols-1 items-end gap-3 md:grid-cols-[1fr_1fr_1fr_auto]">
-            <Input
-              type="text"
-              value={globalSettings.invoice}
-              onChange={(e) =>
-                setGlobalSettings((prev) => ({
-                  ...prev,
-                  invoice: e.target.value,
-                }))
-              }
-              placeholder="Fatura No"
-            />
-            <Select
-              options={warehouseOptions.filter(w => w.value !== "")}
-              value={globalSettings.warehouse}
-              placeholder="Depo Seçiniz"
-              onChange={handleGlobalWarehouseChange}
-            />
-            <Select
-              options={globalLocationOptions.filter(l => l.value !== "")}
-              value={globalSettings.location}
-              placeholder="Lokasyon Seçiniz"
-              onChange={(val: string) =>
-                setGlobalSettings((prev) => ({
-                  ...prev,
-                  location: val,
-                }))
-              }
-            />
-            <Button
-              variant="outline"
-              className="w-full md:w-auto"
-              onClick={applyGlobalsToAll}
-            >
-              Tümüne Uygula
-            </Button>
-          </div>
+          <div className="grid grid-cols-1 items-end gap-3 md:grid-cols-[1fr_1.2fr_1.2fr_1fr_1fr_auto]">
+          {/* Giriş Tipi */}
+          <Select
+            options={entryTypeOptions}
+            value={globalSettings.entry_type}
+            placeholder="Giriş Tipi"
+            onChange={(v: string) =>
+              setGlobalSettings((prev) => ({
+                ...prev,
+                entry_type: v as EntryType,
+              }))
+            }
+          />
+
+          {/* Fatura No */}
+          <Input
+            type="text"
+            value={globalSettings.invoice}
+            onChange={(e) =>
+              setGlobalSettings((prev) => ({
+                ...prev,
+                invoice: e.target.value,
+              }))
+            }
+            placeholder="Fatura No"
+          />
+
+          {/* Tedarikçi Barkod No */}
+          <Input
+            type="text"
+            value={globalSettings.supplier_barcode_no}
+            onChange={(e) =>
+              setGlobalSettings((prev) => ({
+                ...prev,
+                supplier_barcode_no: e.target.value,
+              }))
+            }
+            placeholder="Tedarikçi Barkod No"
+          />
+
+          {/* Depo */}
+          <Select
+            options={warehouseOptions.filter((w) => w.value !== "")}
+            value={globalSettings.warehouse}
+            placeholder="Depo"
+            onChange={handleGlobalWarehouseChange}
+          />
+
+          {/* Lokasyon */}
+          <Select
+            options={globalLocationOptions.filter((l) => l.value !== "")}
+            value={globalSettings.location}
+            placeholder="Lokasyon"
+            onChange={(val: string) =>
+              setGlobalSettings((prev) => ({
+                ...prev,
+                location: val,
+              }))
+            }
+          />
+
+          {/* Tümüne Uygula */}
+          <Button
+            variant="outline"
+            className="w-full md:w-auto"
+            onClick={applyGlobalsToAll}
+          >
+            Tümüne Uygula
+          </Button>
+        </div>
+
 
           <div className="my-4 h-px w-full bg-gray-200 dark:bg-gray-700" />
 

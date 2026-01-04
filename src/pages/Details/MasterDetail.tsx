@@ -49,15 +49,10 @@ function stockUnitLabelTR(v?: string | null) {
   if (s === "weight") return "Ağırlık";
   if (s === "length") return "Uzunluk";
   if (s === "unit") return "Adet";
+  if (s === "box_unit") return "Koli İçi Adet";
   return v ? String(v) : "";
 }
 
-function thicknessUnitLabelTR(v?: string | null) {
-  const s = (v || "").toLowerCase();
-  if (s === "um") return "µm";
-  if (s === "m") return "m";
-  return v ? String(v) : "";
-}
 
 export default function MasterDetailPage() {
   const { id: rawId } = useParams();
@@ -179,22 +174,11 @@ export default function MasterDetailPage() {
               <Label>Stok Ölçü Birimi</Label>
               <Input value={stockUnitLabelTR(m.stock_unit)} disabled />
             </div>
-            <div>
-              <Label>Kalınlık Birimi</Label>
-              <Input value={thicknessUnitLabelTR(m.thickness_unit)} disabled />
-            </div>
 
             {/* 5. satır */}
             <div>
               <Label>Kalınlık</Label>
-              <Input
-                value={
-                  m.thickness === null || m.thickness === undefined
-                    ? ""
-                    : `${m.thickness} ${thicknessUnitLabelTR(m.thickness_unit)}`.trim()
-                }
-                disabled
-              />
+              <Input value={fmtNum(m.thickness, "mm")} disabled />
             </div>
 
             <div>
