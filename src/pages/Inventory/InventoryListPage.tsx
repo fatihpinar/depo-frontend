@@ -212,14 +212,6 @@ export default function InventoryListPage() {
     return "—";
   };
 
-  const renderBoxUnit = (r: Row) => {
-  const isBoxUnitComponent =
-    r.item_type === "component" && normalizeUnit(r.unit) === "box_unit";
-
-    if (!isBoxUnitComponent) return dash;
-
-    return r.box_unit ?? dash;
-  };
   const renderEntryType = (r: Row) => {
     if (r.item_type !== "component") return dash; // ürünlerde yoksa
     return entryTypeLabelTR(r.entry_type);
@@ -234,21 +226,6 @@ export default function InventoryListPage() {
     r.item_type === "component" && normalizeUnit(r.unit) === "area"
       ? (r.height ?? dash)
       : dash;
-
-  const renderArea = (r: Row) => {
-    const isAreaComponent =
-      r.item_type === "component" && normalizeUnit(r.unit) === "area";
-
-    if (!isAreaComponent) return dash;
-
-    const w = Number(r.width);
-    const h = Number(r.height);
-
-    if (!Number.isFinite(w) || !Number.isFinite(h)) return dash;
-
-    const area = w * h;
-    return <span className="whitespace-nowrap">{area}</span>;
-  };
 
   const toDetailsHref = (r: Row) =>
     r.item_type === "product"
