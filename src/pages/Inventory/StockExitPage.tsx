@@ -749,11 +749,19 @@
 
         const compPayload = components.map((c) => {
           if (!c.stock) throw new Error("Eksik component seçimi var.");
+
           const mode: QtyMode = c.qtyMode || "quantity";
+          const m = getMeasure(c.stock); // { value, max, label }
+
+          const consume_qty =
+            mode === "quantity"
+              ? Number(c.consumeQty || 0)
+              : (m.max || 0); // 👈 "Adet" modunda satırın tamamını tüket
+
           return {
             component_id: c.stock.id,
             mode,
-            consume_qty: mode === "quantity" ? Number(c.consumeQty || 0) : undefined,
+            consume_qty,
           };
         });
 
@@ -1682,7 +1690,7 @@
                                     </>
                                   );
                                 }
-                                
+
                                 const m = getMeasure(selected);
                                 const used = Number(c.consumeQty || 0);
                                 const after = Math.max(0, (m.max || 0) - used);

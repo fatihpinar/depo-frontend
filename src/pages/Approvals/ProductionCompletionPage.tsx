@@ -28,6 +28,7 @@ type PendingRow = {
   height?: number | null;
   area?: number | null;
   master?: { id: number; display_label?: string | null } | null;
+  product_name?: string | null;
   warehouse_id?: number | null;
   location_id?: number | null;
 };
@@ -126,6 +127,7 @@ export default function ProductionCompletionPage() {
           v === "" || v === null || v === undefined ? null : Number(v);
 
         const raw: any[] = pending.data || [];
+        console.log("PENDING RAW", raw);
         const items: PendingRow[] = raw.map((r) => {
           const width = toNum(r.width);
           const height = toNum(r.height);
@@ -143,6 +145,7 @@ export default function ProductionCompletionPage() {
             height,
             area: areaFromApi ?? areaComputed,
             master: r.master ?? null,
+            product_name: r.product_name ?? null,
             warehouse_id: toNum(r.warehouse_id),
             location_id: toNum(r.location_id),
           };
@@ -341,15 +344,17 @@ export default function ProductionCompletionPage() {
                   const wh = r.warehouse_id ? String(r.warehouse_id) : "";
                   const locOpts = [
                     { value: "", label: "Seçiniz", disabled: true },
-                    ...(((wh
-                      ? locationsByWarehouse[Number(wh)]
-                      : []) || []
-                    ).map((l) => ({
+                    ...(((wh ? locationsByWarehouse[Number(wh)] : []) || []).map((l) => ({
                       value: String(l.id),
                       label: l.name,
                     })) as any),
                   ];
                   const okBarcode = !!normalize(r.barcode);
+
+                  const label =
+                    r.kind === "product"
+                      ? (r.product_name || "(Tanım Yok)")
+                      : (r.master?.display_label || "(Tanım Yok)");
 
                   return (
                     <div
@@ -367,16 +372,13 @@ export default function ProductionCompletionPage() {
                         <Link
                           to={`/details/${r.kind}/${r.id}`}
                           className="block max-w-full text-left text-sm text-brand-600 hover:underline underline-offset-2 dark:text-brand-400"
-                          title={`${
-                            r.kind === "component" ? "Komponent" : "Ürün"
-                          } detayını aç`}
+                          title={`${r.kind === "component" ? "Komponent" : "Ürün"} detayını aç`}
                         >
                           <span className="block overflow-hidden break-words whitespace-normal leading-snug line-clamp-2">
-                            {r.master?.display_label || "(Tanım Yok)"} #{r.id}
+                            {label} #{r.id}
                           </span>
                         </Link>
                       </div>
-
                       <div className="px-3">
                         <div className="relative">
                           <Input
@@ -501,22 +503,23 @@ export default function ProductionCompletionPage() {
               const wh = r.warehouse_id ? String(r.warehouse_id) : "";
               const locOpts = [
                 { value: "", label: "Seçiniz", disabled: true },
-                ...(((wh
-                  ? locationsByWarehouse[Number(wh)]
-                  : []) || []
-                ).map((l) => ({
+                ...(((wh ? locationsByWarehouse[Number(wh)] : []) || []).map((l) => ({
                   value: String(l.id),
                   label: l.name,
                 })) as any),
               ];
               const okBarcode = !!normalize(r.barcode);
 
+              const label =
+                r.kind === "product"
+                  ? (r.product_name || "(Tanım Yok)")
+                  : (r.master?.display_label || "(Tanım Yok)");
+
               return (
                 <div
                   key={`${r.kind}-${r.id}`}
                   className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800"
                 >
-                  {/* Header */}
                   <div className="mb-3 flex items-start gap-3">
                     <div className="pt-1">
                       <Checkbox
@@ -528,18 +531,15 @@ export default function ProductionCompletionPage() {
                       <Link
                         to={`/details/${r.kind}/${r.id}`}
                         className="block text-sm font-semibold text-brand-600 hover:underline underline-offset-2 dark:text-brand-400"
-                        title={`${
-                          r.kind === "component" ? "Komponent" : "Ürün"
-                        } detayını aç`}
+                        title={`${r.kind === "component" ? "Komponent" : "Ürün"} detayını aç`}
                       >
-                        {r.master?.display_label || "(Tanım Yok)"} #{r.id}
+                        {label} #{r.id}
                       </Link>
                       <div className="mt-1 text-xs text-gray-500">
                         Alan: {fmtArea(r)}
                       </div>
                     </div>
                   </div>
-
                   {/* Fields */}
                   <div className="space-y-3">
                     <div>
