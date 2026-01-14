@@ -43,7 +43,7 @@ interface Location {
   warehouse_id: number;
 }
 
-type StockUnit = "area" | "weight" | "length" | "unit" | "box_unit";
+type StockUnit = "area" | "weight" | "length" | "unit" | "box_unit" | "volume";
 type ThicknessUnit = "um" | "mm";
 type DimUnit = "m" | "mm";
 
@@ -76,6 +76,7 @@ interface Row {
   height_unit?: DimUnit;
   weight?: string;
   length?: string;
+  volume?: string;
   box_unit?: string;
 
   warehouse_id?: string;
@@ -140,11 +141,24 @@ function MasterInlineForm({ onSaved, onCancel }: MasterInlineFormProps) {
 // Yeni (lengthUnit'i kalınlık birimi olarak kullanıyoruz)
   const [lengthUnit, setLengthUnit] = useState<ThicknessUnit>("um");
 
-  const toMmThickness = (val: string, unit: ThicknessUnit) => {
-  const n = Number(val);
+  // Artık "baz birim" = mikron (µm)
+  // um seçili → aynen gönder
+  // mm seçili → 1000 ile çarp (mm → µm)
+  const toBaseThickness = (val: string, unit: ThicknessUnit) => {
+    const n = Number(val);
     if (!Number.isFinite(n)) return null;
-    return unit === "um" ? n / 1000 : n;
+
+    if (unit === "um") {
+      return n;          // 1000 girerse BE'ye 1000 gider
+    }
+
+    if (unit === "mm") {
+      return n * 1000;   // 1 mm → 1000 µm
+    }
+
+    return n; // ileride başka bir şey eklenirse
   };
+
 
   // + yeni stok birimi state'i:
   const [stockUnit, setStockUnit] = useState<StockUnit>("area");
@@ -153,7 +167,8 @@ function MasterInlineForm({ onSaved, onCancel }: MasterInlineFormProps) {
     createSelectOption("area", "Alan (m²)"),
     createSelectOption("weight", "Ağırlık (kg)"),
     createSelectOption("length", "Uzunluk (m)"),
-    createSelectOption("unit", "Adet (EA)"),  // 🔹 yeni
+    createSelectOption("unit", "Adet (EA)"),
+    createSelectOption("volume", "Hacim (lt)"),  // 🔹 yeni
     createSelectOption("box_unit", "Koli İçi Adet"),
   ];
 
@@ -570,7 +585,7 @@ function MasterInlineForm({ onSaved, onCancel }: MasterInlineFormProps) {
         adhesive_type_id: finalAdhesiveTypeId,
 
         // Kalınlık + birimi
-        thickness: thickness ? toMmThickness(thickness, lengthUnit) : null,
+        thickness: thickness ? toBaseThickness(thickness, lengthUnit) : null,
         thickness_unit: lengthUnit,        // yeni alan
 
         // Stok birimi (alan / ağırlık)
@@ -994,6 +1009,7 @@ function StockRow({
   const isArea = stockUnit === "area";
   const isWeight = stockUnit === "weight";
   const isLength = stockUnit === "length";
+  const isVolume = stockUnit === "volume"; 
   const isBoxUnit = stockUnit === "box_unit";
 
   // ✅ sadece lokasyon option üretmeli
@@ -1112,86 +1128,106 @@ function StockRow({
             </div>
           </div>
 
-          {/* 3. satır: En, Boy, Ölçü Birimi */}
-          <div className="grid grid-cols-3 gap-2">
-            <div>
-              <Label>En (mm)</Label>
-              <Input
-                type="number"
-                min="0"
-                step="1"
-                value={row.width || ""}
-                onChange={(e) => onUpdate(row.id, { width: e.target.value })}
-                disabled={!isArea}
-                placeholder="En (mm)"
-              />
-            </div>
+                    {/* 3. satır: En, Boy, Ölçü Birimi (sadece ALAN ise) */}
+          {isArea && (
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <Label>En (mm)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={row.width || ""}
+                  onChange={(e) => onUpdate(row.id, { width: e.target.value })}
+                  placeholder="En (mm)"
+                />
+              </div>
 
-            <div>
-              <Label>{row.height_unit === "mm" ? "Boy (mm)" : "Boy (m)"}</Label>
-              <Input
-                type="number"
-                min="0"
-                step={row.height_unit === "mm" ? "1" : "0.01"}
-                value={row.height || ""}
-                onChange={(e) => onUpdate(row.id, { height: e.target.value })}
-                disabled={!isArea}
-              />
-            </div>
+              <div>
+                <Label>{row.height_unit === "mm" ? "Boy (mm)" : "Boy (m)"}</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step={row.height_unit === "mm" ? "1" : "0.01"}
+                  value={row.height || ""}
+                  onChange={(e) => onUpdate(row.id, { height: e.target.value })}
+                />
+              </div>
 
-            <div>
-              <Label>Ölçü Birimi</Label>
-              <Select
-                options={[
-                  createSelectOption("m", "m"),
-                  createSelectOption("mm", "mm"),
-                ]}
-                value={row.height_unit || "m"}
-                placeholder="m"
-                onChange={(v: string) =>
-                  onUpdate(row.id, { height_unit: v as DimUnit })
-                }
-              />
+              <div>
+                <Label>Ölçü Birimi</Label>
+                <Select
+                  options={[
+                    createSelectOption("m", "m"),
+                    createSelectOption("mm", "mm"),
+                  ]}
+                  value={row.height_unit || "m"}
+                  placeholder="m"
+                  onChange={(v: string) =>
+                    onUpdate(row.id, { height_unit: v as DimUnit })
+                  }
+                />
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* 4. satır: Ağırlık, Uzunluk, Koli içi adet */}
-          <div className="grid grid-cols-3 gap-2">
-            <div>
-              <Label>Ağırlık (kg)</Label>
-              <Input
-                type="number"
-                min="0"
-                value={row.weight || ""}
-                onChange={(e) => onUpdate(row.id, { weight: e.target.value })}
-                disabled={!isWeight}
-              />
-            </div>
+          {/* 4. satır: Ağırlık / Uzunluk / Hacim / Koli içi adet – sadece ilgili birimler için */}
+          {(isWeight || isLength || isVolume || isBoxUnit) && (
+            <div className="grid grid-cols-4 gap-2">
+              {isWeight && (
+                <div>
+                  <Label>Ağırlık (kg)</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    value={row.weight || ""}
+                    onChange={(e) => onUpdate(row.id, { weight: e.target.value })}
+                  />
+                </div>
+              )}
 
-            <div>
-              <Label>Uzunluk (m)</Label>
-              <Input
-                type="number"
-                min="0"
-                value={row.length || ""}
-                onChange={(e) => onUpdate(row.id, { length: e.target.value })}
-                disabled={!isLength}
-              />
-            </div>
+              {isLength && (
+                <div>
+                  <Label>Uzunluk (m)</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    value={row.length || ""}
+                    onChange={(e) => onUpdate(row.id, { length: e.target.value })}
+                  />
+                </div>
+              )}
 
-            <div>
-              <Label>Koli İçi Adet</Label>
-              <Input
-                type="number"
-                min="0"
-                step="1"
-                value={row.box_unit || ""}
-                onChange={(e) => onUpdate(row.id, { box_unit: e.target.value })}
-                disabled={!isBoxUnit}
-                placeholder="Adet"
-              />
+              {isVolume && (
+                <div>
+                  <Label>Hacim</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    value={row.volume || ""}
+                    onChange={(e) => onUpdate(row.id, { volume: e.target.value })}
+                    placeholder="Örn: litre"
+                  />
+                </div>
+              )}
+
+              {isBoxUnit && (
+                <div>
+                  <Label>Koli İçi Adet</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={row.box_unit || ""}
+                    onChange={(e) =>
+                      onUpdate(row.id, { box_unit: e.target.value })
+                    }
+                    placeholder="Adet"
+                  />
+                </div>
+              )}
             </div>
-          </div>
+          )}
 
           {/* 5. satır: Depo, Lokasyon */}
           <div>
@@ -1283,8 +1319,9 @@ function StockRow({
               />
             </div>
 
-            {/* ALT SATIR: 7 eşit kutu */}
-            <div className="grid grid-cols-7 gap-2 items-center">
+            {/* ALT SATIR: Üst satırla aynı kolon genişliklerinde hizalı ölçü alanları */}
+            <div className="grid grid-cols-5 gap-2 items-center">
+              {/* 1. kolon: Adet (her zaman) */}
               <div className="relative">
                 <Input
                   type="number"
@@ -1297,7 +1334,9 @@ function StockRow({
                       return;
                     }
                     const n = parseInt(v, 10);
-                    onUpdate(row.id, { qty: Math.max(1, Number.isNaN(n) ? 1 : n) });
+                    onUpdate(row.id, {
+                      qty: Math.max(1, Number.isNaN(n) ? 1 : n),
+                    });
                   }}
                   onBlur={() => {
                     if (row.qty === "") onUpdate(row.id, { qty: 1 });
@@ -1308,65 +1347,102 @@ function StockRow({
                 </span>
               </div>
 
-              <Input
-                type="number"
-                min="0"
-                step="1"
-                value={row.width || ""}
-                onChange={(e) => onUpdate(row.id, { width: e.target.value })}
-                placeholder="En (mm)"
-                disabled={!isArea}
-              />
+              {/* 2–4. kolonlar: stok birimine göre değişen alanlar */}
+              {isArea && (
+                <>
+                  {/* 2. kolon: En */}
+                  <Input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={row.width || ""}
+                    onChange={(e) => onUpdate(row.id, { width: e.target.value })}
+                    placeholder="En (mm)"
+                  />
 
-              <Input
-                type="number"
-                min="0"
-                step={row.height_unit === "mm" ? "1" : "0.01"}
-                value={row.height || ""}
-                onChange={(e) => onUpdate(row.id, { height: e.target.value })}
-                placeholder={row.height_unit === "mm" ? "Boy (mm)" : "Boy (m)"}
-                disabled={!isArea}
-              />
+                  {/* 3. kolon: Boy */}
+                  <Input
+                    type="number"
+                    min="0"
+                    step={row.height_unit === "mm" ? "1" : "0.01"}
+                    value={row.height || ""}
+                    onChange={(e) => onUpdate(row.id, { height: e.target.value })}
+                    placeholder={row.height_unit === "mm" ? "Boy (mm)" : "Boy (m)"}
+                  />
 
-              <Select
-                options={[
-                  createSelectOption("m", "m"),
-                  createSelectOption("mm", "mm"),
-                ]}
-                value={row.height_unit || "m"}
-                placeholder="m"
-                onChange={(v: string) => onUpdate(row.id, { height_unit: v as DimUnit })}
-              />
+                  {/* 4. kolon: Boy birimi */}
+                  <Select
+                    options={[
+                      createSelectOption("m", "m"),
+                      createSelectOption("mm", "mm"),
+                    ]}
+                    value={row.height_unit || "m"}
+                    placeholder="m"
+                    onChange={(v: string) =>
+                      onUpdate(row.id, { height_unit: v as DimUnit })
+                    }
+                  />
+                </>
+              )}
 
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                value={row.weight || ""}
-                onChange={(e) => onUpdate(row.id, { weight: e.target.value })}
-                placeholder="Kg"
-                disabled={!isWeight}
-              />
+              {isWeight && (
+                <>
+                  {/* 2. kolon: Ağırlık */}
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={row.weight || ""}
+                    onChange={(e) => onUpdate(row.id, { weight: e.target.value })}
+                    placeholder="Ağırlık (kg)"
+                  />
+                </>
+              )}
 
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                value={row.length || ""}
-                onChange={(e) => onUpdate(row.id, { length: e.target.value })}
-                placeholder="Uzunluk"
-                disabled={!isLength}
-              />
+              {isLength && (
+                <>
+                  {/* 2. kolon: Uzunluk */}
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={row.length || ""}
+                    onChange={(e) => onUpdate(row.id, { length: e.target.value })}
+                    placeholder="Uzunluk (m)"
+                  />
+                </>
+              )}
 
-              <Input
-                type="number"
-                min="0"
-                step="1"
-                value={row.box_unit || ""}
-                onChange={(e) => onUpdate(row.id, { box_unit: e.target.value })}
-                placeholder="Koli içi Adet"
-                disabled={!isBoxUnit}
-              />
+              {isVolume && (
+                <>
+                  {/* 2. kolon: Hacim */}
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={row.volume || ""}
+                    onChange={(e) => onUpdate(row.id, { volume: e.target.value })}
+                    placeholder="Hacim (lt)"
+                  />
+                </>
+              )}
+
+              {isBoxUnit && (
+                <>
+                  {/* 2. kolon: Koli içi adet */}
+                  <Input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={row.box_unit || ""}
+                    onChange={(e) => onUpdate(row.id, { box_unit: e.target.value })}
+                    placeholder="Koli içi Adet (ea)"
+                  />
+                </>
+              )}
+
+              {/* 5. kolon şu an boş – tasarım olarak hizayı korumak için bıraktık
+                  (ileride istersen örn. "not" vs. ekleriz) */}
             </div>
           </div>
 
@@ -1646,6 +1722,7 @@ export default function StockEntryPage() {
     height_unit: "m",
     weight: "",
     length: "",
+    volume: "",
     box_unit: "",
 
     warehouse_id: "",
@@ -1764,7 +1841,7 @@ export default function StockEntryPage() {
       // Ölçü alanları zorunlu kontrolü (stok birimine göre)
       const dimErrors: string[] = [];
 
-      rows.forEach((r, idx) => {
+            rows.forEach((r, idx) => {
         const master = mastersRaw.find((m) => m.id === r.master_id);
         const stockUnit = (master?.stock_unit || r.stock_unit || "area") as StockUnit;
 
@@ -1773,15 +1850,15 @@ export default function StockEntryPage() {
         const boyRaw = toNumberOrNull(r.height);
         const boyUnit = (r.height_unit || "m") as DimUnit;
 
-        // Weight / Length
+        // Weight / Length / Volume
         const weight = toNumberOrNull(r.weight);
         const length = toNumberOrNull(r.length);
+        const volume = toNumberOrNull(r.volume);   // 🔹 yeni
 
         if (stockUnit === "area") {
           if (!widthMm || widthMm <= 0 || !boyRaw || boyRaw <= 0) {
             dimErrors.push(String(idx + 1));
           } else {
-            // Dönüşüm sonrası da 0 kontrolü (ek güvenlik)
             const widthM = mmToM(widthMm);
             const heightM = boyToM(boyRaw, boyUnit);
             if (!Number.isFinite(widthM) || !Number.isFinite(heightM) || widthM <= 0 || heightM <= 0) {
@@ -1792,10 +1869,11 @@ export default function StockEntryPage() {
           if (!weight || weight <= 0) dimErrors.push(String(idx + 1));
         } else if (stockUnit === "length") {
           if (!length || length <= 0) dimErrors.push(String(idx + 1));
+        } else if (stockUnit === "volume") {
+          if (!volume || volume <= 0) dimErrors.push(String(idx + 1));   // 🔹 yeni
         } else if (stockUnit === "unit") {
           // Adet → ekstra ölçü zorunluluğu yok
-        }
-          else if (stockUnit === "box_unit") {
+        } else if (stockUnit === "box_unit") {
           const boxQty = toNumberOrNull(r.box_unit);
           if (!boxQty || boxQty <= 0) dimErrors.push(String(idx + 1));
         }
@@ -1831,9 +1909,10 @@ export default function StockEntryPage() {
         const heightM =
           stockUnit === "area" && boyRaw !== null ? boyToM(boyRaw, boyUnit) : null;
 
-        // Weight / Length
+        // Weight / Length / Volume
         const weight = toNumberOrNull(r.weight);
         const length = toNumberOrNull(r.length);
+        const volume = toNumberOrNull(r.volume);   // 🔹 yeni
         const boxQty = toNumberOrNull(r.box_unit);
 
         for (let i = 0; i < Number(r.qty || 0); i++) {
@@ -1848,8 +1927,7 @@ export default function StockEntryPage() {
             height: stockUnit === "area" ? heightM : null,
             weight: stockUnit === "weight" ? weight : null,
             length: stockUnit === "length" ? length : null,
-
-            // ✅ yeni: DB kolon adına göre isim
+            volume: stockUnit === "volume" ? volume : null,
             box_unit: stockUnit === "box_unit" ? boxQty : null,
 
             invoice_no: r.invoice_no?.trim() || null,

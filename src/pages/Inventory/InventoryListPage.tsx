@@ -26,12 +26,14 @@ function exportToExcel(rows: Row[]) {
       Birim: r.unit ?? "",
       En: en,
       Boy: boy,
-      "Koli İçi Adet": r.item_type === "component" ? (r.box_unit ?? "") : "",
+      // "Koli İçi Adet" kolonunu kaldırdık ✅
       Miktar: typeof r.quantity === "number" ? r.quantity : "",
       Depo: r.warehouse_name ?? "",
       Lokasyon: r.location_name ?? "",
       Durum: r.status_label ?? "",
-      Güncelleme: r.updated_at ? new Date(r.updated_at).toLocaleString() : "",
+      Güncelleme: r.updated_at
+        ? new Date(r.updated_at).toLocaleString()
+        : "",
     };
   });
 
@@ -41,19 +43,18 @@ function exportToExcel(rows: Row[]) {
   XLSX.writeFile(wb, "depo-stok.xlsx");
 }
 
-
 type ItemType = "product" | "component";
 
 function normalizeUnit(
   u?: string | null
-): "area" | "weight" | "length" | "unit" | "box_unit" | "" {
+): "area" | "weight" | "length" | "unit" | "box_unit" | "volume" | "" {
   const x = String(u || "").trim().toLowerCase();
   if (x === "area") return "area";
   if (x === "weight") return "weight";
   if (x === "length") return "length";
   if (x === "box_unit") return "box_unit";
-  if (x === "unit") return "unit";
-  if (x === "ea") return "unit";
+  if (x === "volume") return "volume";
+  if (x === "unit" || x === "ea") return "unit";
   return "";
 }
 
@@ -268,18 +269,21 @@ export default function InventoryListPage() {
     if (k === "length") return "Uzunluk (m)";
     if (k === "unit") return "Adet (EA)";
     if (k === "box_unit") return "Koli İçi Adet (ea)";
+    if (k === "volume") return "Hacim (lt)";   // ✅ yeni
     return "—";
   };
 
+
   const unitSuffix = (u?: string | null) => {
-    const k = normalizeUnit(u);
-    if (k === "area") return "(m2)";
-    if (k === "weight") return "(kg)";
-    if (k === "length") return "(m)";
-    if (k === "unit") return "(EA)";
-    if (k === "box_unit") return "(ea)";
-    return "";
-  };
+  const k = normalizeUnit(u);
+  if (k === "area") return "(m2)";
+  if (k === "weight") return "(kg)";
+  if (k === "length") return "(m)";
+  if (k === "unit") return "(EA)";
+  if (k === "box_unit") return "(ea)";
+  if (k === "volume") return "(lt)";   // ✅ yeni
+  return "";
+};
 
   const fmtQtyWithUnit = (r: Row) => {
     if (typeof r.quantity !== "number") return null;
@@ -366,7 +370,7 @@ export default function InventoryListPage() {
       {/* Tablo */}
       <div className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
         <div className="overflow-x-auto scroll-area">
-          <table className="w-full text-sm text-gray-700 dark:text-gray-200">
+          <table className="w-full min-w-max text-sm text-gray-700 dark:text-gray-200">
             <thead>
               <tr className="text-left">
                 {[
@@ -378,8 +382,6 @@ export default function InventoryListPage() {
                   "Miktar",
                   "En (m)",
                   "Boy (m)",
-                  "Alan (m²)",
-                  "Koli İçi Adet (ea)",
                   "Depo",
                   "Lokasyon",
                   "Durum",
@@ -399,7 +401,7 @@ export default function InventoryListPage() {
                 <tr>
                   <td
                     className="px-4 py-6 text-gray-500 dark:text-gray-400"
-                    colSpan={14}
+                    colSpan={12}
                   >
                     Yükleniyor…
                   </td>
@@ -451,10 +453,6 @@ export default function InventoryListPage() {
                     {/* 7-9) En/Boy/Alan */}
                     <td className="px-4 py-3">{renderWidth(r)}</td>
                     <td className="px-4 py-3">{renderHeight(r)}</td>
-                    <td className="px-4 py-3">{renderArea(r)}</td>
-
-                    {/* 10) Koli İçi Adet */}
-                    <td className="px-4 py-3">{renderBoxUnit(r)}</td>
 
                     {/* 11-14) Depo/Lokasyon/Durum/Güncelleme */}
                     <td className="px-4 py-3">{r.warehouse_name ?? dash}</td>
@@ -467,7 +465,7 @@ export default function InventoryListPage() {
                 <tr>
                   <td
                     className="px-4 py-6 text-gray-500 dark:text-gray-400"
-                    colSpan={14}
+                    colSpan={12}
                   >
                     Kayıt bulunamadı
                   </td>

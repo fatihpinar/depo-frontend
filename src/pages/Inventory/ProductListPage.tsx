@@ -152,7 +152,7 @@ export default function ProductsListPage() {
 
       <div className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
         <div className="overflow-x-auto scroll-area">
-          <table className="w-full text-sm text-gray-700 dark:text-gray-200">
+          <table className="w-full min-w-max text-sm text-gray-700 dark:text-gray-200">
             <thead>
               <tr className="text-left">
                 {[

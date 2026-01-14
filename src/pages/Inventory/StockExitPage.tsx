@@ -17,7 +17,7 @@
   type ExitMode = "component" | "product";
   type RowTarget = "sale" | "stock";
   type QtyMode = "unit" | "quantity";
-  type StockUnit = "area" | "weight" | "length" | "unit" | string;
+  type StockUnit = "area" | "weight" | "length" | "unit" | "box_unit" | "volume" | string;
 
   type RecipeRow = {
     recipe_id: string;
@@ -31,13 +31,14 @@
     name: string | null;
     bimeks_code?: string | null;
     stock_unit?: StockUnit | null;
-    box_unit?: number | null; 
+    box_unit?: number | null;
     width?: number | null;
     height?: number | null;
     weight?: number | null;
     length?: number | null;
     area: number;
     areaUnit: string;
+    volume?: number | null;      // ✅ yeni
     warehouse: { id: number; name: string };
     location: { id: number; name: string };
     master_id: number;
@@ -84,7 +85,19 @@
     if (x === "length") return "Uzunluk";
     if (x === "unit") return "Adet";
     if (x === "box_unit") return "Koli içi adet"; // ✅
+    if (x === "volume") return "Hacim"; 
     return "—";
+  };
+
+  const stockUnitSuffix = (u?: string | null) => {
+    const x = norm(u);
+    if (x === "area") return "m²";
+    if (x === "weight") return "kg";
+    if (x === "length") return "m";
+    if (x === "volume") return "lt";
+    if (x === "box_unit") return "ea";
+    if (x === "unit") return "adet";
+    return "";
   };
 
   const getMeasure = (r?: StockRow) => {
@@ -107,6 +120,10 @@
       const v = Number(r.box_unit ?? 0);
       return { value: v, max: v, label: `${v}` };
     }
+    if (u === "volume") {                // ✅ hacim
+    const v = Number(r.volume ?? 0);
+    return { value: v, max: v, label: `${v}` };
+    }
     const v = 1;
     return { value: v, max: v, label: `1` };
   };
@@ -118,6 +135,7 @@
     if (u === "length") return "Uzunluk";
     if (u === "unit") return "Adet";
     if (u === "box_unit") return "Koli içi adet"; //
+    if (u === "volume") return "Hacim";  
     return "—";
   };
 
@@ -131,11 +149,12 @@
         </span>
       );
     }
+    if (u === "area") return <span>{r.area ?? "—"}</span>;  // ✅
     if (u === "weight") return <span>{r.weight ?? "—"}</span>;
     if (u === "length") return <span>{r.length ?? "—"}</span>;
     if (u === "box_unit") return <span>{r.box_unit ?? "—"}</span>; // ✅
     if (u === "unit") return <span>Adet</span>;
-
+    if (u === "volume") return <span>{r.volume ?? "—"}</span>;  // ✅
     return "—";
   };
 
@@ -412,6 +431,7 @@
             weight: r.weight ?? null,
             length: r.length ?? null,
             box_unit: r.box_unit ?? null,
+            volume: r.volume ?? null,
             area: Number(r.area ?? 0),
             areaUnit,
             warehouse: r.warehouse || { id: 0, name: "-" },
@@ -1328,42 +1348,71 @@
                         </div>
                       )}
 
-                      {/* Stok özeti */}
                       {selected && (
-                        <div className="text-xs text-gray-500 dark:text-gray-400">
-                          {(() => {
-                            const mode: QtyMode = c.qtyMode || "unit";
-                            const masterId = selected.master_id;
-                            const usedBeforeUnits = components
-                              .slice(0, idx)
-                              .filter((x) => x.stock?.master_id === masterId && (x.qtyMode || "unit") === "unit").length;
+                      <div className="text-xs text-gray-500 dark:text-gray-400">
+                        {(() => {
+                          const mode: QtyMode = c.qtyMode || "unit";
+                          const masterId = selected.master_id;
+                          const suf = stockUnitSuffix(selected.stock_unit);
 
-                            if (mode === "unit") {
-                              const total = masterCounts[masterId];
-                              const hasTotal = typeof total === "number";
-                              const after = hasTotal ? Math.max(0, total - usedBeforeUnits - 1) : null;
+                          const usedBeforeUnits = components
+                            .slice(0, idx)
+                            .filter(
+                              (x) =>
+                                x.stock?.master_id === masterId &&
+                                (x.qtyMode || "unit") === "unit",
+                            ).length;
 
-                              return (
-                                <>
-                                  Depoda: <span className={toneClass(Number(total ?? NaN), true)}>{hasTotal ? total : "…"}</span> •
-                                  Sonrası: {after !== null ? <span className={toneClass(after, true)}>{after}</span> : "—"}
-                                </>
-                              );
-                            }
-
-                            const m = getMeasure(selected);
-                            const used = Number(c.consumeQty || 0);
-                            const after = Math.max(0, (m.max || 0) - used);
+                          if (mode === "unit") {
+                            const total = masterCounts[masterId];
+                            const hasTotal = typeof total === "number";
+                            const after = hasTotal
+                              ? Math.max(0, total - usedBeforeUnits - 1)
+                              : null;
 
                             return (
                               <>
-                                Mevcut: <span className={toneClass(m.max, true)}>{m.max}</span> •
-                                Sonrası: <span className={toneClass(after, true)}>{after}</span>
+                                Depoda:{" "}
+                                <span className={toneClass(Number(total ?? NaN), true)}>
+                                  {hasTotal ? (
+                                    <>
+                                      {total} {suf || "adet"}
+                                    </>
+                                  ) : (
+                                    "…"
+                                  )}
+                                </span>{" "}
+                                • Sonrası:{" "}
+                                {after !== null ? (
+                                  <span className={toneClass(after, true)}>
+                                    {after} {suf || "adet"}
+                                  </span>
+                                ) : (
+                                  "—"
+                                )}
                               </>
                             );
-                          })()}
-                        </div>
-                      )}
+                          }
+
+                          const m = getMeasure(selected);
+                          const used = Number(c.consumeQty || 0);
+                          const after = Math.max(0, (m.max || 0) - used);
+
+                          return (
+                            <>
+                              Mevcut:{" "}
+                              <span className={toneClass(m.max, true)}>
+                                {m.max} {suf}
+                              </span>{" "}
+                              • Sonrası:{" "}
+                              <span className={toneClass(after, true)}>
+                                {after} {suf}
+                              </span>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    )}
                     </div>
                   </div>
 
@@ -1599,31 +1648,55 @@
                               (() => {
                                 const mode: QtyMode = c.qtyMode || "unit";
                                 const masterId = selected.master_id;
+                                const suf = stockUnitSuffix(selected.stock_unit);
+
                                 const usedBeforeUnits = components
                                   .slice(0, idx)
-                                  .filter((x) => x.stock?.master_id === masterId && (x.qtyMode || "unit") === "unit").length;
+                                  .filter(
+                                    (x) =>
+                                      x.stock?.master_id === masterId &&
+                                      (x.qtyMode || "unit") === "unit",
+                                  ).length;
 
                                 if (mode === "unit") {
                                   const total = masterCounts[masterId];
                                   const hasTotal = typeof total === "number";
-                                  const after = hasTotal ? Math.max(0, total - usedBeforeUnits - 1) : null;
+                                  const after = hasTotal
+                                    ? Math.max(0, total - usedBeforeUnits - 1)
+                                    : null;
 
                                   return (
                                     <>
-                                      Depoda: <span className={toneClass(Number(total ?? NaN), true)}>{hasTotal ? total : "…"}</span> •
-                                      Sonrası: {after !== null ? <span className={toneClass(after, true)}>{after}</span> : "—"}
+                                      Depoda:{" "}
+                                      <span className={toneClass(Number(total ?? NaN), true)}>
+                                        {hasTotal ? `${total} adet` : "…"}
+                                      </span>{" "}
+                                      • Sonrası:{" "}
+                                      {after !== null ? (
+                                        <span className={toneClass(after, true)}>
+                                          {after} adet
+                                        </span>
+                                      ) : (
+                                        "—"
+                                      )}
                                     </>
                                   );
                                 }
-
+                                
                                 const m = getMeasure(selected);
                                 const used = Number(c.consumeQty || 0);
                                 const after = Math.max(0, (m.max || 0) - used);
 
                                 return (
                                   <>
-                                    Mevcut: <span className={toneClass(m.max, true)}>{m.max}</span> •
-                                    Sonrası: <span className={toneClass(after, true)}>{after}</span>
+                                    Mevcut:{" "}
+                                    <span className={toneClass(m.max, true)}>
+                                      {m.max} {suf}
+                                    </span>{" "}
+                                    • Sonrası:{" "}
+                                    <span className={toneClass(after, true)}>
+                                      {after} {suf}
+                                    </span>
                                   </>
                                 );
                               })()
@@ -1633,7 +1706,7 @@
                               "—"
                             )}
                           </div>
-
+                          
                           {/* Depo (component modunda) */}
                           {exitMode === "component" ? (
                             <Select

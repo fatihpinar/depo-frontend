@@ -10,7 +10,7 @@ import api from "../../services/api";
 import { Link } from "react-router-dom";
 import * as XLSX from "xlsx";
 
-type StockUnit = "area" | "weight" | "length" | "unit" | string;
+type StockUnit = "area" | "weight" | "length" | "unit" | "box_unit" | "volume" | string;
 
 type Row = {
   id: number;
@@ -25,7 +25,7 @@ type Row = {
     id: number;
     bimeks_product_name?: string | null;
     bimeks_code?: string | null;
-    stock_unit?: StockUnit | null; // area / weight / length / unit
+    stock_unit?: StockUnit | null; // area / weight / length / unit / volume / box_unit
   };
 
   width?: number | null;
@@ -34,6 +34,7 @@ type Row = {
 
   weight?: number | null;
   length?: number | null;
+  volume?: number | null;   // ✅ Hacim
   box_unit?: number | null; // ✅ components.box_unit
 
   created_by?: number | null;
@@ -49,6 +50,7 @@ type Row = {
   notes?: string | null;
   invoice_no?: string | null;
 };
+
 
 const dash = <span className="text-gray-400 dark:text-gray-500">—</span>;
 
@@ -73,6 +75,7 @@ function exportToExcel(rows: Row[]) {
     const alan = unit === "area" ? r.area ?? "" : "";
     const uzunluk = unit === "length" ? r.length ?? "" : "";
     const agirlik = unit === "weight" ? r.weight ?? "" : "";
+    const hacim = unit === "volume" ? r.volume ?? "" : ""; 
     const koliIciAdet = unit === "box_unit" ? r.box_unit ?? "" : "";
 
     return {
@@ -86,6 +89,7 @@ function exportToExcel(rows: Row[]) {
       Boy: boy,
       Alan: alan,
       Uzunluk: uzunluk,
+      Hacim: hacim,   
       "Ağırlık": agirlik,
       "Koli İçi Adet": koliIciAdet,
       Depo: r.warehouse?.name ?? "",
@@ -110,11 +114,12 @@ export default function ComponentListPage() {
   const [statusId, setStatusId] = useState("");
   const unitLabel = (u?: string | null) => {
   switch ((u || "").toLowerCase()) {
-    case "unit": return "Adet";
-    case "length": return "Uzunluk";
-    case "weight": return "Ağırlık";
-    case "area": return "Alan";
-    case "box_unit": return "Koli İçi Adet"
+    case "unit": return "Adet (EA)";
+    case "length": return "Uzunluk (m)";
+    case "weight": return "Ağırlık (kg)";
+    case "area": return "Alan (m²)";
+    case "box_unit": return "Koli İçi Adet (ea)"
+    case "volume": return "Hacim (lt)"; 
     default: return "-";
   }
 };
@@ -190,6 +195,7 @@ export default function ComponentListPage() {
   const renderWeight = (r: Row) => (normalizeUnit(r.master?.stock_unit) === "weight" ? (r.weight ?? dash) : dash);
   const renderLength = (r: Row) => (normalizeUnit(r.master?.stock_unit) === "length" ? (r.length ?? dash) : dash);
   const renderBoxUnit = (r: Row) => (normalizeUnit(r.master?.stock_unit) === "box_unit" ? (r.box_unit ?? dash) : dash);
+  const renderVolume = (r: Row) => (normalizeUnit(r.master?.stock_unit) === "volume" ? (r.volume ?? dash) : dash);
 
   const renderStatus = (r: Row) => r.status ?? dash;
 
@@ -219,7 +225,7 @@ export default function ComponentListPage() {
 
       <div className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
         <div className="overflow-x-auto scroll-area">
-          <table className="w-full text-sm text-gray-700 dark:text-gray-200">
+          <table className="w-full min-w-max text-sm text-gray-700 dark:text-gray-200">
             <thead>
               <tr className="text-left">
                 {[
@@ -233,6 +239,7 @@ export default function ComponentListPage() {
                   "Alan",
                   "Ağırlık",
                   "Uzunluk",
+                  "Hacim", 
                   "Koli İçi Adet",
                   "Durum",
                   "Depo",
@@ -290,6 +297,7 @@ export default function ComponentListPage() {
                     <td className="px-4 py-3">{renderArea(r)}</td>
                     <td className="px-4 py-3">{renderWeight(r)}</td>
                     <td className="px-4 py-3">{renderLength(r)}</td>
+                    <td className="px-4 py-3">{renderVolume(r)}</td>
                     <td className="px-4 py-3">{renderBoxUnit(r)}</td>
 
                     <td className="px-4 py-3">{renderStatus(r)}</td>
