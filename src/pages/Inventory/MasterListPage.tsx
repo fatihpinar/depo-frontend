@@ -49,7 +49,7 @@ function exportToExcel(rows: Row[]) {
     "Liner Renk": r.liner_color_name ?? "",
     "Liner Türü": r.liner_type_name ?? "",
     "Yapışkan Türü": r.adhesive_type_name ?? "",
-    "Kalınlık (mm)": r.thickness ?? "",
+    "Kalınlık (μm)": r.thickness ?? "",
     "Taşıyıcı Yoğunluk": r.carrier_density ?? "",
 
     // ✅ Tarihler (UI gibi)
@@ -314,7 +314,7 @@ export default function MasterListPage() {
                   Yapışkan Türü
                 </th>
                 <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
-                  Kalınlık (mm)
+                  Kalınlık (μm)
                 </th>
                 <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
                   Taşıyıcı Yoğunluk
