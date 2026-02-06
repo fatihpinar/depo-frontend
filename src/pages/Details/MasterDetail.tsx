@@ -180,7 +180,7 @@ export default function MasterDetailPage() {
 
             <div>
               <Label>Kalınlık</Label>
-              <Input value={fmtNum(m.thickness, "mm")} disabled />
+              <Input value={fmtNum(m.thickness, "µm")} disabled />
             </div>
 
             <div>
