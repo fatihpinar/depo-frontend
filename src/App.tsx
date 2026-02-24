@@ -14,7 +14,7 @@ import ProductDetailPage from "./pages/Details/ProductDetail";
 import ComponentDetailPage from "./pages/Details/ComponentDetail";
 import LegacyDetailsRedirect from "./components/common/LegacyDetailsRedirect";
 
-// ✅ INVENTORY PAGES (yeni klasör & isimler)
+// INVENTORY
 import StockEntryPage from "./pages/Inventory/StockEntryPage";
 import MasterListPage from "./pages/Inventory/MasterListPage";
 import ComponentListPage from "./pages/Inventory/ComponentListPage";
@@ -43,7 +43,7 @@ export default function App() {
           <Route element={<AppLayout />}>
             <Route index path="/" element={<Home />} />
 
-                        {/* Stok giriş */}
+            {/* Stok giriş */}
             <Route element={<RequirePermission anyOf={["stock.entry.create"]} />}>
               <Route path="/inventory/stock-entry" element={<StockEntryPage />} />
             </Route>
@@ -53,7 +53,7 @@ export default function App() {
               <Route path="/inventory/stock-exit" element={<StockExitPage />} />
             </Route>
 
-            {/* Tanım listesi (masters) */}
+            {/* Tanım listesi */}
             <Route element={<RequirePermission anyOf={["masters.read"]} />}>
               <Route path="/inventory/masters" element={<MasterListPage />} />
             </Route>
@@ -68,7 +68,7 @@ export default function App() {
               <Route path="/inventory/products" element={<ProductListPage />} />
             </Route>
 
-            {/* Envanter listesi (toplam stok görünümü) */}
+            {/* Envanter listesi */}
             <Route element={<RequirePermission anyOf={["inventory.read"]} />}>
               <Route path="/inventory/list" element={<InventoryListPage />} />
             </Route>
@@ -86,10 +86,16 @@ export default function App() {
               <Route path="/screenprint-receipts" element={<ScreenprintCompletionPage />} />
             </Route>
 
-            {/* Detay rotaları */}
-            <Route path="/details/master/:id" element={<MasterDetailPage />} />
+            // ✅ SADECE master detail korunacak
+            <Route element={<RequirePermission anyOf={["masters.detail.read"]} />}>
+              <Route path="/details/master/:id" element={<MasterDetailPage />} />
+            </Route>
+
+            // ✅ component + product detail HERKES girecek (depocu dahil)
             <Route path="/details/product/:id" element={<ProductDetailPage />} />
             <Route path="/details/component/:id" element={<ComponentDetailPage />} />
+
+            // legacy redirect kalsın
             <Route path="/details/:kind/:id" element={<LegacyDetailsRedirect />} />
 
             {/* Profil */}

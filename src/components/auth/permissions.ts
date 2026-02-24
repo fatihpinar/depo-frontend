@@ -41,12 +41,11 @@ export function getPerms(): PermKey[] {
 function isAdminLikeUser(user: any) {
   if (!user) return false;
 
-  // Olası alan adları: role (string), role_key (string), roleId/role_id (number)
   const role = user.role ?? user.role_key ?? null;
   const roleId = user.roleId ?? user.role_id ?? null;
 
   if (role === "admin" || role === "warehouse_manager") return true;
-  if (roleId === 1) return true; // id=1 -> admin varsayımı (backend’de öyle kurduk)
+  if (roleId === 1 || roleId === 2) return true; // ✅ düzeltme
   return false;
 }
 
@@ -81,4 +80,19 @@ export async function refreshPermissions(): Promise<PermKey[]> {
   const perms = data?.permissions ?? [];
   setPerms(perms);
   return perms;
+
+  
+}
+
+// admin + depo yöneticisi (id:1 ve 2) master detaya girebilir
+export function canOpenMasterDetail(): boolean {
+  const user = getAuth()?.user;
+  if (!user) return false;
+
+  const role = user.role ?? user.role_key ?? null;
+  const roleId = user.roleId ?? user.role_id ?? null;
+
+  if (role === "admin" || role === "warehouse_manager") return true;
+  if (roleId === 1 || roleId === 2) return true; // ✅ admin + depo yöneticisi
+  return false;
 }

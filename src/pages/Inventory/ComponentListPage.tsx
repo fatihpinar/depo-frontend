@@ -9,8 +9,16 @@ import Button from "../../components/ui/button/Button";
 import api from "../../services/api";
 import { Link } from "react-router-dom";
 import * as XLSX from "xlsx";
+import { hasAny } from "../../components/auth/permissions";
 
-type StockUnit = "area" | "weight" | "length" | "unit" | "box_unit" | "volume" | string;
+type StockUnit =
+  | "area"
+  | "weight"
+  | "length"
+  | "unit"
+  | "box_unit"
+  | "volume"
+  | string;
 
 type Row = {
   id: number;
@@ -25,7 +33,7 @@ type Row = {
     id: number;
     bimeks_product_name?: string | null;
     bimeks_code?: string | null;
-    stock_unit?: StockUnit | null; // area / weight / length / unit / volume / box_unit
+    stock_unit?: StockUnit | null;
   };
 
   width?: number | null;
@@ -34,8 +42,8 @@ type Row = {
 
   weight?: number | null;
   length?: number | null;
-  volume?: number | null;   // ✅ Hacim
-  box_unit?: number | null; // ✅ components.box_unit
+  volume?: number | null;
+  box_unit?: number | null;
 
   created_by?: number | null;
   approved_by?: number | null;
@@ -51,7 +59,6 @@ type Row = {
   invoice_no?: string | null;
 };
 
-
 const dash = <span className="text-gray-400 dark:text-gray-500">—</span>;
 
 const entryTypeLabel = (v?: string | null) => {
@@ -61,10 +68,11 @@ const entryTypeLabel = (v?: string | null) => {
   return "—";
 };
 
-
 function normalizeUnit(u?: string | null): string {
   return (u || "").toString().trim().toLowerCase();
 }
+
+/* ================== EXCEL EXPORT ================== */
 
 function exportToExcel(rows: Row[]) {
   const data = rows.map((r) => {
@@ -75,21 +83,22 @@ function exportToExcel(rows: Row[]) {
     const alan = unit === "area" ? r.area ?? "" : "";
     const uzunluk = unit === "length" ? r.length ?? "" : "";
     const agirlik = unit === "weight" ? r.weight ?? "" : "";
-    const hacim = unit === "volume" ? r.volume ?? "" : ""; 
+    const hacim = unit === "volume" ? r.volume ?? "" : "";
     const koliIciAdet = unit === "box_unit" ? r.box_unit ?? "" : "";
 
     return {
       Tip: "Komponent",
       Barkod: r.barcode,
-      "Tanım": r.master?.bimeks_product_name ?? "",
+      Tanım: r.master?.bimeks_product_name ?? "",
       "Bimeks Kodu": r.master?.bimeks_code ?? "",
-      "Giriş Tipi": entryTypeLabel(r.entry_type) === "—" ? "" : entryTypeLabel(r.entry_type),
-      "Birim": unit || "",
+      "Giriş Tipi":
+        entryTypeLabel(r.entry_type) === "—" ? "" : entryTypeLabel(r.entry_type),
+      Birim: unit || "",
       En: en,
       Boy: boy,
       Alan: alan,
       Uzunluk: uzunluk,
-      Hacim: hacim,   
+      Hacim: hacim,
       "Ağırlık": agirlik,
       "Koli İçi Adet": koliIciAdet,
       Depo: r.warehouse?.name ?? "",
@@ -106,37 +115,60 @@ function exportToExcel(rows: Row[]) {
   XLSX.writeFile(wb, "depo-stok.xlsx");
 }
 
-export default function ComponentListPage() {
+export default function StockListPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [q, setQ] = useState("");
   const [warehouse, setWarehouse] = useState("");
   const [master, setMaster] = useState("");
   const [statusId, setStatusId] = useState("");
-  const unitLabel = (u?: string | null) => {
-  switch ((u || "").toLowerCase()) {
-    case "unit": return "Adet (EA)";
-    case "length": return "Uzunluk (m)";
-    case "weight": return "Ağırlık (kg)";
-    case "area": return "Alan (m²)";
-    case "box_unit": return "Koli İçi Adet (ea)"
-    case "volume": return "Hacim (lt)"; 
-    default: return "-";
-  }
-};
 
-
-  const [warehouses, setWarehouses] = useState<{ id: number; name: string }[]>([]);
-  const [masters, setMasters] = useState<{ id: number; bimeks_product_name?: string }[]>([]);
+  const [warehouses, setWarehouses] = useState<{ id: number; name: string }[]>(
+    []
+  );
+  const [masters, setMasters] = useState<{ id: number; bimeks_product_name?: string }[]>(
+    []
+  );
 
   const [loading, setLoading] = useState(false);
+
+  // ✅ master detail linkine izin var mı?
+  // Burada ID check yapmıyoruz, permission ile karar veriyoruz.
+  const canClickMaster = hasAny(["masters.detail.read"]);
+
+  const unitLabel = (u?: string | null) => {
+    switch ((u || "").toLowerCase()) {
+      case "unit":
+        return "Adet (EA)";
+      case "length":
+        return "Uzunluk (m)";
+      case "weight":
+        return "Ağırlık (kg)";
+      case "area":
+        return "Alan (m²)";
+      case "box_unit":
+        return "Koli İçi Adet (ea)";
+      case "volume":
+        return "Hacim (lt)";
+      default:
+        return "-";
+    }
+  };
+
+  /* ========== LOOKUPS ========== */
 
   useEffect(() => {
     api.get("/lookups/warehouses").then((r) => setWarehouses(r.data || []));
   }, []);
 
   useEffect(() => {
-    api.get("/masters").then((r) => setMasters(r.data || []));
+    // masters.read yoksa (depocu) 403 gelir -> patlatma
+    api
+      .get("/masters")
+      .then((r) => setMasters(r.data || []))
+      .catch(() => setMasters([]));
   }, []);
+
+  /* ========== DATA ========== */
 
   const fetchData = async () => {
     setLoading(true);
@@ -160,15 +192,23 @@ export default function ComponentListPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /* ========== OPTIONS ========== */
+
   const warehouseOptions = useMemo(
-    () => [{ value: "", label: "Depo (tümü)" }, ...warehouses.map((w) => ({ value: String(w.id), label: w.name }))],
+    () => [
+      { value: "", label: "Depo (tümü)" },
+      ...warehouses.map((w) => ({ value: String(w.id), label: w.name })),
+    ],
     [warehouses]
   );
 
   const masterOptions = useMemo(
     () => [
       { value: "", label: "Tanım (tümü)" },
-      ...masters.map((m) => ({ value: String(m.id), label: m.bimeks_product_name || `#${m.id}` })),
+      ...masters.map((m) => ({
+        value: String(m.id),
+        label: m.bimeks_product_name || `#${m.id}`,
+      })),
     ],
     [masters]
   );
@@ -187,17 +227,27 @@ export default function ComponentListPage() {
     []
   );
 
-  // ✅ stock_unit'e göre alanları göster
-  const renderWidth = (r: Row) => (normalizeUnit(r.master?.stock_unit) === "area" ? (r.width ?? dash) : dash);
-  const renderHeight = (r: Row) => (normalizeUnit(r.master?.stock_unit) === "area" ? (r.height ?? dash) : dash);
-  const renderArea = (r: Row) => (normalizeUnit(r.master?.stock_unit) === "area" ? (r.area ?? dash) : dash);
+  /* ========== RENDER HELPERS ========== */
 
-  const renderWeight = (r: Row) => (normalizeUnit(r.master?.stock_unit) === "weight" ? (r.weight ?? dash) : dash);
-  const renderLength = (r: Row) => (normalizeUnit(r.master?.stock_unit) === "length" ? (r.length ?? dash) : dash);
-  const renderBoxUnit = (r: Row) => (normalizeUnit(r.master?.stock_unit) === "box_unit" ? (r.box_unit ?? dash) : dash);
-  const renderVolume = (r: Row) => (normalizeUnit(r.master?.stock_unit) === "volume" ? (r.volume ?? dash) : dash);
+  const renderWidth = (r: Row) =>
+    normalizeUnit(r.master?.stock_unit) === "area" ? (r.width ?? dash) : dash;
+  const renderHeight = (r: Row) =>
+    normalizeUnit(r.master?.stock_unit) === "area" ? (r.height ?? dash) : dash;
+  const renderArea = (r: Row) =>
+    normalizeUnit(r.master?.stock_unit) === "area" ? (r.area ?? dash) : dash;
+
+  const renderWeight = (r: Row) =>
+    normalizeUnit(r.master?.stock_unit) === "weight" ? (r.weight ?? dash) : dash;
+  const renderLength = (r: Row) =>
+    normalizeUnit(r.master?.stock_unit) === "length" ? (r.length ?? dash) : dash;
+  const renderBoxUnit = (r: Row) =>
+    normalizeUnit(r.master?.stock_unit) === "box_unit" ? (r.box_unit ?? dash) : dash;
+  const renderVolume = (r: Row) =>
+    normalizeUnit(r.master?.stock_unit) === "volume" ? (r.volume ?? dash) : dash;
 
   const renderStatus = (r: Row) => r.status ?? dash;
+
+  /* ========== UI ========== */
 
   return (
     <div className="space-y-6">
@@ -211,9 +261,24 @@ export default function ComponentListPage() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
-          <Select options={warehouseOptions} value={warehouse} onChange={setWarehouse} placeholder="Depo" />
-          <Select options={masterOptions} value={master} onChange={setMaster} placeholder="Tanım" />
-          <Select options={statusOptions} value={statusId} onChange={setStatusId} placeholder="Durum" />
+          <Select
+            options={warehouseOptions}
+            value={warehouse}
+            onChange={setWarehouse}
+            placeholder="Depo"
+          />
+          <Select
+            options={masterOptions}
+            value={master}
+            onChange={setMaster}
+            placeholder="Tanım"
+          />
+          <Select
+            options={statusOptions}
+            value={statusId}
+            onChange={setStatusId}
+            placeholder="Durum"
+          />
           <Button variant="primary" onClick={fetchData}>
             Uygula
           </Button>
@@ -239,7 +304,7 @@ export default function ComponentListPage() {
                   "Alan",
                   "Ağırlık",
                   "Uzunluk",
-                  "Hacim", 
+                  "Hacim",
                   "Koli İçi Adet",
                   "Durum",
                   "Depo",
@@ -252,7 +317,10 @@ export default function ComponentListPage() {
                   "Onay Tarihi",
                   "Notlar",
                 ].map((h) => (
-                  <th key={h} className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
+                  <th
+                    key={h}
+                    className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400"
+                  >
                     {h}
                   </th>
                 ))}
@@ -262,7 +330,7 @@ export default function ComponentListPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td className="px-4 py-6 text-gray-500 dark:text-gray-400" colSpan={20}>
+                  <td className="px-4 py-6 text-gray-500 dark:text-gray-400" colSpan={22}>
                     Yükleniyor…
                   </td>
                 </tr>
@@ -272,25 +340,47 @@ export default function ComponentListPage() {
                     key={r.id}
                     className="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-white/5"
                   >
+                    {/* ✅ Barkod: herkes tıklayabilir */}
                     <td className="px-4 py-3">
-                      <Link to={`/details/component/${r.id}`} className="text-brand-600 hover:underline dark:text-brand-400">
+                      <Link
+                        to={`/details/component/${r.id}`}
+                        className="text-brand-600 hover:underline dark:text-brand-400"
+                      >
                         {r.barcode}
                       </Link>
                     </td>
 
+                    {/* ✅ Tanım: sadece masters.detail.read olanlar tıklayabilir */}
                     <td className="px-4 py-3 min-w-[240px]">
                       {r.master?.bimeks_product_name ? (
-                        <Link to={`/details/component/${r.id}`} className="text-brand-600 hover:underline dark:text-brand-400">
-                          {r.master.bimeks_product_name}
-                        </Link>
+                        canClickMaster && r.master?.id ? (
+                          <Link
+                            to={`/details/master/${r.master.id}`}
+                            className="text-brand-600 hover:underline dark:text-brand-400"
+                          >
+                            {r.master.bimeks_product_name}
+                          </Link>
+                        ) : (
+                          <span className="text-gray-800 dark:text-gray-100">
+                            {r.master.bimeks_product_name}
+                          </span>
+                        )
                       ) : (
                         dash
                       )}
                     </td>
 
-                    <td className="px-4 py-3 whitespace-nowrap">{r.master?.bimeks_code ? r.master.bimeks_code : dash}</td>
-                    <td className="px-4 py-3 whitespace-nowrap">{entryTypeLabel(r.entry_type)}</td>
-                    <td className="px-4 py-3 font-medium">{unitLabel(r.master?.stock_unit)}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      {r.master?.bimeks_code ? r.master.bimeks_code : dash}
+                    </td>
+
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      {entryTypeLabel(r.entry_type)}
+                    </td>
+
+                    <td className="px-4 py-3 font-medium">
+                      {unitLabel(r.master?.stock_unit)}
+                    </td>
 
                     <td className="px-4 py-3">{renderWidth(r)}</td>
                     <td className="px-4 py-3">{renderHeight(r)}</td>
@@ -307,25 +397,37 @@ export default function ComponentListPage() {
                     <td className="px-4 py-3">{r.invoice_no ?? dash}</td>
 
                     <td className="px-4 py-3">
-                      {r.created_by_user?.full_name ?? r.created_by_user?.username ?? r.created_by ?? dash}
+                      {r.created_by_user?.full_name ??
+                        r.created_by_user?.username ??
+                        r.created_by ??
+                        dash}
                     </td>
 
                     <td className="px-4 py-3">
-                      {r.approved_by_user?.full_name ?? r.approved_by_user?.username ?? r.approved_by ?? dash}
+                      {r.approved_by_user?.full_name ??
+                        r.approved_by_user?.username ??
+                        r.approved_by ??
+                        dash}
                     </td>
 
-                    <td className="px-4 py-3">{r.created_at ? new Date(r.created_at).toLocaleString() : dash}</td>
+                    <td className="px-4 py-3">
+                      {r.created_at ? new Date(r.created_at).toLocaleString() : dash}
+                    </td>
 
-                    <td className="px-4 py-3">{r.updated_at ? new Date(r.updated_at).toLocaleString() : dash}</td>
+                    <td className="px-4 py-3">
+                      {r.updated_at ? new Date(r.updated_at).toLocaleString() : dash}
+                    </td>
 
-                    <td className="px-4 py-3">{r.approved_at ? new Date(r.approved_at).toLocaleString() : dash}</td>
+                    <td className="px-4 py-3">
+                      {r.approved_at ? new Date(r.approved_at).toLocaleString() : dash}
+                    </td>
 
                     <td className="px-4 py-3">{r.notes ?? dash}</td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td className="px-4 py-6 text-gray-500 dark:text-gray-400" colSpan={20}>
+                  <td className="px-4 py-6 text-gray-500 dark:text-gray-400" colSpan={22}>
                     Kayıt bulunamadı
                   </td>
                 </tr>

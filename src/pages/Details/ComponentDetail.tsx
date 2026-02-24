@@ -63,6 +63,7 @@ export default function ComponentDetailPage() {
   const [area, setArea] = useState<number | "">(""); // otomatik
   const [weight, setWeight] = useState<number | "">("");
   const [length, setLength] = useState<number | "">("");
+  const [volume, setVolume] = useState<number | "">(""); // ✅ YENİ (hacim)
 
   // master meta
   const [masterCode, setMasterCode] = useState<string>("");
@@ -74,11 +75,13 @@ export default function ComponentDetailPage() {
   const isWeight = masterStockUnit === "weight";
   const isLength = masterStockUnit === "length";
   const isUnit = masterStockUnit === "unit";
+  const isVolume = masterStockUnit === "volume"; // ✅ YENİ
 
   const widthEnabled = isArea;
   const heightEnabled = isArea;
   const weightEnabled = isWeight;
   const lengthEnabled = isLength;
+  const volumeEnabled = isVolume; // ✅ YENİ
 
   // stock_unit değişince pasif kalanları temizle
   useEffect(() => {
@@ -89,6 +92,7 @@ export default function ComponentDetailPage() {
     }
     if (!isWeight) setWeight("");
     if (!isLength) setLength("");
+    if (!isVolume) setVolume(""); // ✅ YENİ
     // unit ise zaten hepsi pasif olacak
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [masterStockUnit]);
@@ -260,6 +264,13 @@ export default function ComponentDetailPage() {
         setLength(
           lengthNum !== null && !Number.isNaN(lengthNum) ? lengthNum : ""
         );
+
+        // ✅ volume
+        const volumeNum =
+          data.volume !== null && data.volume !== undefined ? Number(data.volume) : null;
+
+        setVolume(volumeNum !== null && !Number.isNaN(volumeNum) ? volumeNum : "");
+
       } catch (err) {
         console.error("component details load error:", err);
         alert("Detay yüklenemedi.");
@@ -287,6 +298,7 @@ export default function ComponentDetailPage() {
       let outArea: number | null = null;
       let outWeight: number | null = null;
       let outLength: number | null = null;
+      let outVolume: number | null = null;
 
       if (isArea) {
         // en/boy opsiyonel; girildiyse ikisi birlikte ve >0 olmalı
@@ -337,6 +349,19 @@ export default function ComponentDetailPage() {
         outLength = ll;
       }
 
+      if (isVolume) {
+        if (volume === "") {
+          alert("Hacim girilmelidir.");
+          return;
+        }
+        const vv = Number(volume);
+        if (!Number.isFinite(vv) || vv <= 0) {
+          alert("Hacim 0'dan büyük sayı olmalıdır.");
+          return;
+        }
+        outVolume = vv;
+      }
+
       if (isUnit) {
         // hepsi null kalacak
       }
@@ -356,6 +381,7 @@ export default function ComponentDetailPage() {
         area: outArea,
         weight: outWeight,
         length: outLength,
+        volume: outVolume, // ✅ YENİ
       };
 
       await api.put(`/components/${id}`, payload);
@@ -533,6 +559,19 @@ export default function ComponentDetailPage() {
                   }
                   placeholder={lengthEnabled ? "Zorunlu" : "—"}
                   disabled={!lengthEnabled}
+                />
+              </div>
+
+              <div>
+                <Label>Hacim</Label>
+                <Input
+                  type="number"
+                  value={volume === "" ? "" : String(volume)}
+                  onChange={(e) =>
+                    setVolume(e.target.value === "" ? "" : Number(e.target.value))
+                  }
+                  placeholder={volumeEnabled ? "Zorunlu" : "—"}
+                  disabled={!volumeEnabled}
                 />
               </div>
 

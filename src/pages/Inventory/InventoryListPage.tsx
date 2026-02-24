@@ -10,38 +10,52 @@ import Button from "../../components/ui/button/Button";
 import api from "../../services/api";
 import * as XLSX from "xlsx";
 
-function exportToExcel(rows: Row[]) {
-  const data = rows.map((r) => {
-    const k = normalizeUnit(r.unit);
+/* ================== AUTH HELPERS ================== */
 
-    const en =
-      r.item_type === "component" && k === "area" ? (r.width ?? "") : "";
-    const boy =
-      r.item_type === "component" && k === "area" ? (r.height ?? "") : "";
+type JwtPayload = {
+  sub?: number | string;
+  role?: string; // role_key
+  role_id?: number; // varsa en sağlamı
+  [k: string]: any;
+};
 
-    return {
-      Tip: r.item_type === "product" ? "Ürün" : "Komponent",
-      Barkod: r.barcode,
-      Tanım: r.name ?? "",
-      Birim: r.unit ?? "",
-      En: en,
-      Boy: boy,
-      // "Koli İçi Adet" kolonunu kaldırdık ✅
-      Miktar: typeof r.quantity === "number" ? r.quantity : "",
-      Depo: r.warehouse_name ?? "",
-      Lokasyon: r.location_name ?? "",
-      Durum: r.status_label ?? "",
-      Güncelleme: r.updated_at
-        ? new Date(r.updated_at).toLocaleString()
-        : "",
-    };
-  });
+function safeParseJwtPayload(): JwtPayload | null {
+  const token = localStorage.getItem("token");
+  if (!token) return null;
 
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(data);
-  XLSX.utils.book_append_sheet(wb, ws, "Depo Stok");
-  XLSX.writeFile(wb, "depo-stok.xlsx");
+  try {
+    const payloadPart = token.split(".")[1];
+    if (!payloadPart) return null;
+
+    const base64 = payloadPart.replace(/-/g, "+").replace(/_/g, "/");
+    const json = decodeURIComponent(
+      atob(base64)
+        .split("")
+        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+        .join("")
+    );
+
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
 }
+
+// Sadece admin(1) + depo yöneticisi(2) detay sayfalarına tıklayabilir
+function canClickDetails(): boolean {
+  const p = safeParseJwtPayload();
+  if (!p) return false;
+
+  const roleId = Number(p.role_id);
+  if (Number.isFinite(roleId) && roleId > 0) {
+    return roleId === 1 || roleId === 2;
+  }
+
+  const roleKey = (p.role || "").toString();
+  return roleKey === "admin" || roleKey === "warehouse_manager";
+}
+
+/* ================== TYPES & HELPERS ================== */
 
 type ItemType = "product" | "component";
 
@@ -66,11 +80,12 @@ type Row = {
   unit: string | null;
   quantity: number;
 
-   // ✅ yeni alanlar
   width?: number | null;
   height?: number | null;
   weight?: number | null;
   length?: number | null;
+  area?: number | null;
+  volume?: number | null;
 
   entry_type?: "count" | "purchase" | null;
   box_unit?: number | null;
@@ -88,10 +103,42 @@ type Warehouse = { id: number; name: string };
 type Location = { id: number; name: string; warehouse_id: number };
 
 const TYPE_OPTIONS = [
-  { value: "all",       label: "Tümü" },
+  { value: "all", label: "Tümü" },
   { value: "component", label: "Komponent" },
-  { value: "product",   label: "Ürün" },
+  { value: "product", label: "Ürün" },
 ];
+
+/* ================== EXCEL EXPORT ================== */
+
+function exportToExcel(rows: Row[]) {
+  const data = rows.map((r) => {
+    const k = normalizeUnit(r.unit);
+
+    const en =
+      r.item_type === "component" && k === "area" ? (r.width ?? "") : "";
+    const boy =
+      r.item_type === "component" && k === "area" ? (r.height ?? "") : "";
+
+    return {
+      Tip: r.item_type === "product" ? "Ürün" : "Komponent",
+      Barkod: r.barcode,
+      Tanım: r.name ?? "",
+      Birim: r.unit ?? "",
+      En: en,
+      Boy: boy,
+      Miktar: typeof r.quantity === "number" ? r.quantity : "",
+      Depo: r.warehouse_name ?? "",
+      Lokasyon: r.location_name ?? "",
+      Durum: r.status_label ?? "",
+      Güncelleme: r.updated_at ? new Date(r.updated_at).toLocaleString() : "",
+    };
+  });
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(data);
+  XLSX.utils.book_append_sheet(wb, ws, "Depo Stok");
+  XLSX.writeFile(wb, "depo-stok.xlsx");
+}
 
 export default function InventoryListPage() {
   const [rows, setRows] = useState<Row[]>([]);
@@ -105,10 +152,14 @@ export default function InventoryListPage() {
 
   // lookups
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [locationsByWarehouse, setLocationsByWarehouse] =
-    useState<Record<number, Location[]>>({});
+  const [locationsByWarehouse, setLocationsByWarehouse] = useState<
+    Record<number, Location[]>
+  >({});
 
   const [loading, setLoading] = useState(false);
+
+  // ✅ sadece admin+depo yöneticisi tıklayabilir
+  const allowClick = canClickDetails();
 
   /* ------------ Lookups ------------ */
   useEffect(() => {
@@ -137,7 +188,7 @@ export default function InventoryListPage() {
       { value: "", label: "Depo (Tümü)" },
       ...warehouses.map((w) => ({ value: String(w.id), label: w.name })),
     ],
-    [warehouses],
+    [warehouses]
   );
 
   const locationOptions = useMemo(() => {
@@ -150,7 +201,7 @@ export default function InventoryListPage() {
     ];
   }, [warehouseId, locationsByWarehouse]);
 
-  /* ------------ Fetch (override destekli) ------------ */
+  /* ------------ Fetch ------------ */
   const fetchData = async (overrides?: {
     q?: string;
     type?: string;
@@ -170,7 +221,6 @@ export default function InventoryListPage() {
           type: _type || "all",
           warehouseId: _wh || undefined,
           locationId: _lc || undefined,
-          // statusId GÖNDERMİYORUZ; BE inStockOnly ile 1'e sabitliyor.
           limit: 200,
           offset: 0,
         },
@@ -203,7 +253,6 @@ export default function InventoryListPage() {
   };
 
   /* ------------ Render helpers ------------ */
-
   const dash = <span className="text-gray-400 dark:text-gray-500">—</span>;
 
   const entryTypeLabelTR = (v?: string | null) => {
@@ -213,18 +262,18 @@ export default function InventoryListPage() {
   };
 
   const renderEntryType = (r: Row) => {
-    if (r.item_type !== "component") return dash; // ürünlerde yoksa
+    if (r.item_type !== "component") return dash;
     return entryTypeLabelTR(r.entry_type);
   };
 
   const renderWidth = (r: Row) =>
     r.item_type === "component" && normalizeUnit(r.unit) === "area"
-      ? (r.width ?? dash)
+      ? r.width ?? dash
       : dash;
 
   const renderHeight = (r: Row) =>
     r.item_type === "component" && normalizeUnit(r.unit) === "area"
-      ? (r.height ?? dash)
+      ? r.height ?? dash
       : dash;
 
   const toDetailsHref = (r: Row) =>
@@ -246,31 +295,62 @@ export default function InventoryListPage() {
     if (k === "length") return "Uzunluk (m)";
     if (k === "unit") return "Adet (EA)";
     if (k === "box_unit") return "Koli İçi Adet (ea)";
-    if (k === "volume") return "Hacim (lt)";   // ✅ yeni
+    if (k === "volume") return "Hacim (lt)";
     return "—";
   };
 
-
   const unitSuffix = (u?: string | null) => {
-  const k = normalizeUnit(u);
-  if (k === "area") return "(m2)";
-  if (k === "weight") return "(kg)";
-  if (k === "length") return "(m)";
-  if (k === "unit") return "(EA)";
-  if (k === "box_unit") return "(ea)";
-  if (k === "volume") return "(lt)";   // ✅ yeni
-  return "";
+    const k = normalizeUnit(u);
+    if (k === "area") return "(m2)";
+    if (k === "weight") return "(kg)";
+    if (k === "length") return "(m)";
+    if (k === "unit") return "(EA)";
+    if (k === "box_unit") return "(ea)";
+    if (k === "volume") return "(lt)";
+    return "";
+  };
+
+  const getComponentQty = (r: Row): number | null => {
+  const k = normalizeUnit(r.unit);
+
+  if (k === "area") {
+    if (typeof r.area === "number") return r.area;
+    const w = typeof r.width === "number" ? r.width : null;
+    const h = typeof r.height === "number" ? r.height : null;
+    return w !== null && h !== null ? w * h : null;
+  }
+
+  if (k === "weight") return typeof r.weight === "number" ? r.weight : null;
+  if (k === "length") return typeof r.length === "number" ? r.length : null;
+  if (k === "volume") return typeof r.volume === "number" ? r.volume : null;
+  if (k === "box_unit") return typeof r.box_unit === "number" ? r.box_unit : null;
+
+  // unit/ea ise satır adedi mantığı (bu endpointte quantity zaten var)
+  return typeof r.quantity === "number" ? r.quantity : null;
 };
 
-  const fmtQtyWithUnit = (r: Row) => {
-    if (typeof r.quantity !== "number") return null;
-    const suf = unitSuffix(r.unit);
+const fmtQtyWithUnit = (r: Row) => {
+
+  // product -> quantity
+  if (r.item_type === "product") {
+    if (typeof r.quantity !== "number") return dash;
     return (
       <span className="whitespace-nowrap">
-        {r.quantity} {suf}
+        {r.quantity} {unitSuffix(r.unit)}
       </span>
     );
-  };
+  }
+
+  // component -> unit'e göre alan/agirlik/uzunluk/hacim/...
+  const val = getComponentQty(r);
+  if (val === null) return dash;
+
+  return (
+    <span className="whitespace-nowrap">
+      {val} {unitSuffix(r.unit)}
+    </span>
+  );
+};
 
   /* ------------ UI ------------ */
   return (
@@ -393,6 +473,7 @@ export default function InventoryListPage() {
                       {r.item_type === "product" ? "Ürün" : "Komponent"}
                     </td>
 
+                    {/* ✅ Barkod: sadece allowClick ise link */}
                     <td className="px-4 py-3">
                       <Link
                         to={toDetailsHref(r)}
@@ -402,36 +483,37 @@ export default function InventoryListPage() {
                       </Link>
                     </td>
 
+                    {/* ✅ Tanım: sadece allowClick ise link */}
                     <td className="px-4 py-3 min-w-[240px]">
                       {r.name ? (
-                        <Link
-                          to={toDetailsHref(r)}
-                          className="text-brand-600 hover:underline dark:text-brand-400"
-                        >
-                          {r.name}
-                        </Link>
+                        allowClick ? (
+                          <Link
+                            to={toDetailsHref(r)}
+                            className="text-brand-600 hover:underline dark:text-brand-400"
+                          >
+                            {r.name}
+                          </Link>
+                        ) : (
+                          <span className="text-gray-800 dark:text-gray-100">
+                            {r.name}
+                          </span>
+                        )
                       ) : (
-                        <span className="text-gray-400 dark:text-gray-500">
-                          —
-                        </span>
+                        <span className="text-gray-400 dark:text-gray-500">—</span>
                       )}
                     </td>
+
                     <td className="px-4 py-3">{renderEntryType(r)}</td>
-                    {/* 5) Birim */}
+
                     <td className="px-4 py-3">
                       {unitLabelTR(r.unit) !== "—" ? unitLabelTR(r.unit) : dash}
                     </td>
 
-                    {/* 6) Miktar */}
-                    <td className="px-4 py-3">
-                      {typeof r.quantity === "number" ? fmtQtyWithUnit(r) : dash}
-                    </td>
+                    <td className="px-4 py-3">{fmtQtyWithUnit(r)}</td>
 
-                    {/* 7-9) En/Boy/Alan */}
                     <td className="px-4 py-3">{renderWidth(r)}</td>
                     <td className="px-4 py-3">{renderHeight(r)}</td>
 
-                    {/* 11-14) Depo/Lokasyon/Durum/Güncelleme */}
                     <td className="px-4 py-3">{r.warehouse_name ?? dash}</td>
                     <td className="px-4 py-3">{r.location_name ?? dash}</td>
                     <td className="px-4 py-3">{r.status_label ?? dash}</td>

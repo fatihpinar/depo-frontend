@@ -15,7 +15,8 @@ const UNIT_LABEL_MAP: Record<string, string> = {
   unit: "unit (EA)",
   weight: "weight (kg)",
   area: "area (m²)",
-  box_unit: "box unit (ea)"
+  box_unit: "box unit (ea)",
+  volume: "volume (lt)"
 };
 
 function toNumberSafe(v: any) {
@@ -76,7 +77,7 @@ type Row = {
   id: number;
   bimeks_code: string | null;
   bimeks_product_name: string | null;
-  stock_unit?: "area" | "weight" | "length" | "unit" |"box_unit" | null;
+  stock_unit?: "area" | "weight" | "length" | "unit" |"box_unit" | "volume" | null;
   total_count?: number | string | null; // ✅ toplam adet
   total_qty?: number | string | null;   // ✅ toplam miktar
   product_type_id: number;
@@ -122,6 +123,7 @@ export default function MasterListPage() {
     if (u === "length") return "Uzunluk (m)";
     if (u === "unit") return "Adet";
     if (u === "box_unit") return "Koli İçi Adet";
+    if (u === "volume") return "Hacim (lt)";
     return "—";
   };
 
@@ -131,6 +133,7 @@ export default function MasterListPage() {
     if (u === "length") return "m";
     if (u === "unit") return "EA";
     if (u === "box_unit") return "ea";
+    if (u === "volume") return "lt";
     return "";
   };
 

@@ -62,20 +62,20 @@ export default function ProductsListPage() {
   const [warehouses, setWarehouses] = useState<WarehouseOpt[]>([]);
   const [loading, setLoading] = useState(false);
   const [statusId, setStatusId] = useState("");
-  const statusOptions = useMemo(
-  () => [
-    { value: "", label: "Durum (tümü)" },
-    { value: "1", label: "Stokta" },
-    { value: "4", label: "Beklemede" },
-    { value: "2", label: "Kullanıldı" },
-    { value: "3", label: "Satıldı" },
-    { value: "5", label: "Hasarlı/Kayıp" },
-    { value: "6", label: "Üretimde" },
-    { value: "7", label: "Baskıda" },
-  ],
-  []
-);
 
+  const statusOptions = useMemo(
+    () => [
+      { value: "", label: "Durum (tümü)" },
+      { value: "1", label: "Stokta" },
+      { value: "4", label: "Beklemede" },
+      { value: "2", label: "Kullanıldı" },
+      { value: "3", label: "Satıldı" },
+      { value: "5", label: "Hasarlı/Kayıp" },
+      { value: "6", label: "Üretimde" },
+      { value: "7", label: "Baskıda" },
+    ],
+    []
+  );
 
   /* lookups */
   useEffect(() => {
@@ -113,12 +113,11 @@ export default function ProductsListPage() {
     [warehouses]
   );
 
+  const dash = <span className="text-gray-400 dark:text-gray-500">—</span>;
+
   return (
     <div className="space-y-6">
-      <PageMeta
-        title="Ürün Listesi | TailAdmin"
-        description="Oluşturulan ürünler"
-      />
+      <PageMeta title="Ürün Listesi | TailAdmin" description="Oluşturulan ürünler" />
       <PageBreadcrumb pageTitle="Ürün Listesi" />
 
       <ComponentCard title="Filtreler">
@@ -134,7 +133,6 @@ export default function ProductsListPage() {
             onChange={setWarehouse}
             placeholder="Depo"
           />
-          {/* YENİ: Durum filtresi */}
           <Select
             options={statusOptions}
             value={statusId}
@@ -177,13 +175,11 @@ export default function ProductsListPage() {
                 ))}
               </tr>
             </thead>
+
             <tbody>
               {loading ? (
                 <tr>
-                  <td
-                    className="px-4 py-6 text-gray-500 dark:text-gray-400"
-                    colSpan={11}
-                  >
+                  <td className="px-4 py-6 text-gray-500 dark:text-gray-400" colSpan={11}>
                     Yükleniyor…
                   </td>
                 </tr>
@@ -193,7 +189,7 @@ export default function ProductsListPage() {
                     key={r.id}
                     className="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-white/5"
                   >
-                    {/* Barkod */}
+                    {/* Barkod -> HERKES product detail */}
                     <td className="px-4 py-3">
                       <Link
                         to={`/details/product/${r.id}`}
@@ -203,7 +199,7 @@ export default function ProductsListPage() {
                       </Link>
                     </td>
 
-                    {/* Tanım -> ürün adı */}
+                    {/* Ürün adı -> HERKES product detail */}
                     <td className="px-4 py-3 min-w-[240px]">
                       {r.product_name ? (
                         <Link
@@ -213,110 +209,46 @@ export default function ProductsListPage() {
                           {r.product_name}
                         </Link>
                       ) : (
-                        <span className="text-gray-400 dark:text-gray-500">
-                          —
-                        </span>
+                        dash
                       )}
                     </td>
 
-                    {/* Durum */}
-                    <td className="px-4 py-3">
-                      {r.status ?? (
-                        <span className="text-gray-400 dark:text-gray-500">
-                          —
-                        </span>
-                      )}
-                    </td>
+                    <td className="px-4 py-3">{r.status ?? dash}</td>
+                    <td className="px-4 py-3">{r.warehouse?.name ?? dash}</td>
+                    <td className="px-4 py-3">{r.location?.name ?? dash}</td>
 
-                    {/* Depo */}
-                    <td className="px-4 py-3">
-                      {r.warehouse?.name ?? (
-                        <span className="text-gray-400 dark:text-gray-500">
-                          —
-                        </span>
-                      )}
-                    </td>
-
-                    {/* Lokasyon */}
-                    <td className="px-4 py-3">
-                      {r.location?.name ?? (
-                        <span className="text-gray-400 dark:text-gray-500">
-                          —
-                        </span>
-                      )}
-                    </td>
-
-                    {/* Oluşturan */}
                     <td className="px-4 py-3">
                       {r.created_by_user?.full_name ??
                         r.created_by_user?.username ??
-                        r.created_by ?? (
-                          <span className="text-gray-400 dark:text-gray-500">
-                            —
-                          </span>
-                        )}
+                        r.created_by ??
+                        dash}
                     </td>
 
-                    {/* Onaylayan */}
                     <td className="px-4 py-3">
                       {r.approved_by_user?.full_name ??
                         r.approved_by_user?.username ??
-                        r.approved_by ?? (
-                          <span className="text-gray-400 dark:text-gray-500">
-                            —
-                          </span>
-                        )}
+                        r.approved_by ??
+                        dash}
                     </td>
 
-                    {/* Oluşturma */}
                     <td className="px-4 py-3">
-                      {r.created_at ? (
-                        new Date(r.created_at).toLocaleString()
-                      ) : (
-                        <span className="text-gray-400 dark:text-gray-500">
-                          —
-                        </span>
-                      )}
+                      {r.created_at ? new Date(r.created_at).toLocaleString() : dash}
                     </td>
 
-                    {/* Güncelleme */}
                     <td className="px-4 py-3">
-                      {r.updated_at ? (
-                        new Date(r.updated_at).toLocaleString()
-                      ) : (
-                        <span className="text-gray-400 dark:text-gray-500">
-                          —
-                        </span>
-                      )}
+                      {r.updated_at ? new Date(r.updated_at).toLocaleString() : dash}
                     </td>
 
-                    {/* Onay Tarihi */}
                     <td className="px-4 py-3">
-                      {r.approved_at ? (
-                        new Date(r.approved_at).toLocaleString()
-                      ) : (
-                        <span className="text-gray-400 dark:text-gray-500">
-                          —
-                        </span>
-                      )}
+                      {r.approved_at ? new Date(r.approved_at).toLocaleString() : dash}
                     </td>
 
-                    {/* Notlar */}
-                    <td className="px-4 py-3">
-                      {r.notes ?? (
-                        <span className="text-gray-400 dark:text-gray-500">
-                          —
-                        </span>
-                      )}
-                    </td>
+                    <td className="px-4 py-3">{r.notes ?? dash}</td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td
-                    className="px-4 py-6 text-gray-500 dark:text-gray-400"
-                    colSpan={11}
-                  >
+                  <td className="px-4 py-6 text-gray-500 dark:text-gray-400" colSpan={11}>
                     Kayıt bulunamadı
                   </td>
                 </tr>
