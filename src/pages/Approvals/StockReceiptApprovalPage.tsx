@@ -23,6 +23,7 @@ type PendingRow = {
   id: number;
   kind: "component" | "product";
   barcode: string;
+  supplier_barcode_no?: string | null;   // ✅ EKLENDİ
   unit?: "EA" | "M" | "KG" | string | null;
   quantity?: number | null;
   width?: number | null;
@@ -169,6 +170,7 @@ export default function StockReceiptApprovalPage() {
             id: r.id,
             kind: r.kind,
             barcode: r.barcode || "",
+            supplier_barcode_no: r.supplier_barcode_no ?? null,
             unit: r.unit ?? null,
             quantity: toNum(r.quantity),
             width,
@@ -422,6 +424,11 @@ export default function StockReceiptApprovalPage() {
                               ? `${nf.format(r.width)} × ${nf.format(r.height)}`
                               : "—"}
                           </span>
+
+                          <span>
+                            <span className="text-gray-400">Tedarikçi Barkod:</span>{" "}
+                            {r.supplier_barcode_no ? r.supplier_barcode_no : "—"}
+                          </span>
                         </div>
                       </div>
 
@@ -583,6 +590,9 @@ export default function StockReceiptApprovalPage() {
                         En/Boy: {r.kind === "component" && typeof r.width === "number" && typeof r.height === "number"
                           ? `${nf.format(r.width)} × ${nf.format(r.height)}`
                           : "—"}
+                      </div>
+                      <div className="mt-1 text-xs text-gray-500">
+                        Tedarikçi Barkod: {r.supplier_barcode_no ? r.supplier_barcode_no : "—"}
                       </div>
                     </div>
                   </div>
