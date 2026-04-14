@@ -15,7 +15,18 @@ import Button from "../../components/ui/button/Button";
 const safeRandomId = () =>
   (globalThis as any)?.crypto?.randomUUID?.() ??
   "id_" + Math.random().toString(36).slice(2, 10);
+
 const humanize = (s: string) => String(s).replace(/_/g, " ");
+
+const normalizeUnit = (row: any): string =>
+  row?.unit || row?.master?.stock_unit || "-";
+
+const normalizeMasterName = (row: any): string | null =>
+  row?.master?.name ||
+  row?.master?.display_label ||
+  row?.master?.bimeks_product_name ||
+  row?.name ||
+  null;
 
 /* ---------- Lookups ---------- */
 type Warehouse = { id: number; name: string };
@@ -26,10 +37,14 @@ type StatusOpt = { value: number; label: string };
 
 /* ---------- Product comp rows ---------- */
 type ProductCompRow = {
-  id: number; // component id
+  id: number;
   barcode: string;
   unit: string;
-  master: { id: number; name: string | null };
+  master: {
+    id: number;
+    name?: string | null;
+    stock_unit?: string | null;
+  };
   consume_qty: number;
   link_id?: number;
 };
@@ -42,13 +57,12 @@ type RemovalRow = {
   unit: string;
   master_name: string | null;
   original_consume: number;
+
   return_qty?: number;
-  new_barcode?: string;
   warehouse_id?: number | "";
   location_id?: number | "";
 };
 
-/* ---------- Hurda (FIRE) ---------- */
 type ScrapRow = {
   link_id?: number;
   component_id: number;
@@ -56,8 +70,26 @@ type ScrapRow = {
   unit: string;
   master_name: string | null;
   original_consume: number;
-  fire_qty?: number; // EA ise UI'da 1 sabit gösterilecek
+
+  fire_qty?: number;
   reason?: string;
+};
+
+
+const normalizeUnitKey = (unit?: string | null) =>
+  String(unit || "")
+    .trim()
+    .toLowerCase()
+    .replace("²", "2");
+
+const isAreaUnit = (unit?: string | null) => {
+  const u = normalizeUnitKey(unit);
+  return u === "alan (m2)" || u === "alan (m²)" || u === "area" || u === "m2";
+};
+
+const isEaUnit = (unit?: string | null) => {
+  const u = normalizeUnitKey(unit);
+  return u === "ea";
 };
 
 /* ---------- Stoktaki component picker satırı ---------- */
@@ -70,6 +102,7 @@ type StockRow = {
   warehouse: { id: number; name: string };
   location: { id: number; name: string };
 };
+
 type AddRow = {
   key: string;
   stock?: StockRow;
@@ -83,15 +116,15 @@ type TransitionRow = {
   item_type: "component" | "product";
   item_id: number;
   action:
-    | "CREATE"
-    | "APPROVE"
-    | "ASSEMBLE_PRODUCT"
-    | "CONSUME"
-    | "RETURN"
-    | "MOVE"
-    | "STATUS_CHANGE"
-    | "ADJUST"
-    | "ATTRIBUTE_CHANGE";
+  | "CREATE"
+  | "APPROVE"
+  | "ASSEMBLE_PRODUCT"
+  | "CONSUME"
+  | "RETURN"
+  | "MOVE"
+  | "STATUS_CHANGE"
+  | "ADJUST"
+  | "ATTRIBUTE_CHANGE";
   qty_delta?: number | null;
   unit?: string | null;
   from_status_id?: number | null;
@@ -154,10 +187,12 @@ export default function ProductDetailPage() {
     ],
     [warehouses]
   );
+
   const locationOptions = useMemo(() => {
     const list = warehouseId
       ? locationsByWarehouse[Number(warehouseId)] || []
       : [];
+
     return [
       { value: "", label: "Seçiniz", disabled: true },
       ...list.map((l) => ({ value: String(l.id), label: l.name })),
@@ -168,6 +203,7 @@ export default function ProductDetailPage() {
   const ensureLocations = async (wh: number | "") => {
     const w = Number(wh || 0);
     if (!w || locationsByWarehouse[w]) return;
+
     try {
       const { data } = await api.get(`/lookups/locations`, {
         params: { warehouseId: w },
@@ -178,20 +214,76 @@ export default function ProductDetailPage() {
     }
   };
 
+  const enrichProductComponents = async (
+    rows: any[] = []
+  ): Promise<ProductCompRow[]> => {
+    const enriched = await Promise.all(
+      rows.map(async (c: any) => {
+        let unit = normalizeUnit(c);
+
+        if (unit === "-" && c?.id) {
+          try {
+            const { data } = await api.get(`/components/${c.id}`);
+            unit = data?.unit || data?.master?.stock_unit || "-";
+          } catch (e) {
+            console.error(`component detail load error: ${c.id}`, e);
+          }
+        }
+
+        return {
+          ...c,
+          unit,
+          master: {
+            id: Number(c?.master?.id || c?.master_id || 0),
+            name: normalizeMasterName(c),
+            stock_unit: c?.master?.stock_unit || null,
+          },
+        };
+      })
+    );
+
+    return enriched;
+  };
+
+  const loadProductDetails = async (productId: number) => {
+    const { data } = await api.get(`/products/${productId}`);
+
+    setBarcode(data.barcode || "");
+    setStatusId(data.status_id || "");
+    setWarehouseId(data.warehouse?.id || "");
+
+    if (data.warehouse?.id) {
+      await ensureLocations(data.warehouse.id);
+    }
+
+    setLocationId(data.location?.id || "");
+    setNotes(data.notes || "");
+    setComponents(await enrichProductComponents(data.components || []));
+    setBimeksCode(data.bimeks_code || "");
+    setProductName(data.product_name || "");
+  };
+
   const loadAddChoices = async (rowKey: string, q: string) => {
     try {
       const res = await api.get("/components", {
         params: { search: q || undefined, availableOnly: true },
       });
+
       const items: StockRow[] = (res.data || []).map((r: any) => ({
         id: r.id,
         barcode: r.barcode,
-        unit: r.unit,
+        unit: normalizeUnit(r),
         quantity: r.quantity,
-        name: r.master?.display_label || r.master?.name || r.name,
+        name:
+          r.master?.display_label ||
+          r.master?.bimeks_product_name ||
+          r.master?.name ||
+          r.name ||
+          "-",
         warehouse: r.warehouse || { id: 0, name: "-" },
         location: r.location || { id: 0, name: "-" },
       }));
+
       setAddChoices((prev) => ({ ...prev, [rowKey]: items }));
     } catch (e) {
       console.error("components fetch error:", e);
@@ -203,70 +295,80 @@ export default function ProductDetailPage() {
     () => addRows.map((r) => r.stock?.id).filter(Boolean) as number[],
     [addRows]
   );
+
   const addAddRow = () => {
     const key = safeRandomId();
     setAddRows((p) => [...p, { key, open: false }]);
     setAddSearch((s) => ({ ...s, [key]: "" }));
   };
+
   const toggleAddDropdown = (idx: number, open?: boolean) => {
     setAddRows((prev) =>
       prev.map((r, i) =>
         i === idx ? { ...r, open: open ?? !r.open } : { ...r, open: false }
       )
     );
+
     const row = addRows[idx];
     if (row) {
       const q = addSearch[row.key] ?? "";
       loadAddChoices(row.key, q);
     }
   };
+
   const chooseAddComponent = (idx: number, row: StockRow) => {
     setAddRows((prev) =>
       prev.map((r, i) =>
         i === idx
           ? {
-              ...r,
-              stock: row,
-              consumeQty: row.unit === "EA" ? undefined : r.consumeQty,
-              open: false,
-            }
+            ...r,
+            stock: row,
+            consumeQty: isEaUnit(row.unit) ? undefined : r.consumeQty,
+            open: false,
+          }
           : r
       )
     );
   };
+
   const setAddQty = (key: string, val: string) => {
     setAddRows((prev) =>
       prev.map((r) =>
         r.key !== key
           ? r
           : {
-              ...r,
-              consumeQty:
-                r.stock?.unit === "EA"
-                  ? undefined
-                  : Math.max(0, Number(val || 0)),
-            }
+            ...r,
+            consumeQty:
+              isEaUnit(r.stock?.unit)
+                ? undefined
+                : Math.max(0, Number(val || 0)),
+          }
       )
     );
   };
+
   const removeAddRow = (key: string) => {
     setAddRows((prev) => prev.filter((r) => r.key !== key));
+
     setAddSearch((s) => {
       const n = { ...s };
       delete n[key];
       return n;
     });
+
     setAddChoices((c) => {
       const n = { ...c } as any;
       delete n[key];
       return n;
     });
   };
+
   const addRowsValid =
     addRows.length > 0 &&
     addRows.every((r) => {
       if (!r.stock) return false;
-      if (r.stock.unit === "EA") return true;
+      if (isEaUnit(r.stock.unit)) return true;
+
       const q = Number(r.consumeQty || 0);
       return q > 0 && q <= (r.stock?.quantity ?? 0);
     });
@@ -278,7 +380,6 @@ export default function ProductDetailPage() {
         const whRes = await api.get("/lookups/warehouses");
         setWarehouses(whRes.data || []);
 
-        // Statüler için BE varsa onu kullan, yoksa fallback
         try {
           const st = await api.get("/lookups/statuses");
           const rows: StatusOpt[] =
@@ -286,6 +387,7 @@ export default function ProductDetailPage() {
               value: Number(s.id),
               label: String(s.label ?? s.code),
             })) ?? [];
+
           if (rows.length) setStatuses(rows);
         } catch {
           setStatuses([
@@ -310,20 +412,11 @@ export default function ProductDetailPage() {
       navigate("/404");
       return;
     }
+
     (async () => {
       try {
         setLoading(true);
-        const { data } = await api.get(`/products/${id}`);
-        setBarcode(data.barcode || "");
-        setStatusId(data.status_id || "");
-        setWarehouseId(data.warehouse?.id || "");
-        if (data.warehouse?.id) await ensureLocations(data.warehouse.id);
-        setLocationId(data.location?.id || "");
-        setNotes(data.notes || "");
-        setComponents((data.components || []) as ProductCompRow[]);
-        setBimeksCode(data.bimeks_code || "");
-        setProductName(data.product_name || "");
-        // recipe_id arka planda kalsın, UI'de göstermiyoruz
+        await loadProductDetails(id);
       } catch (err) {
         console.error("product details load error:", err);
         alert("Detay yüklenemedi.");
@@ -361,17 +454,21 @@ export default function ProductDetailPage() {
   const handleAddPersist = async () => {
     try {
       if (!addRowsValid) return;
+
       const payload = addRows.map((r) => ({
         component_id: r.stock!.id,
-        consume_qty:
-          r.stock!.unit === "EA" ? undefined : Number(r.consumeQty || 0),
+        consume_qty: isEaUnit(r.stock!.unit)
+          ? undefined
+          : Number(r.consumeQty || 0),
       }));
+
       await api.post(`/products/${id}/components/add`, payload);
-      const { data } = await api.get(`/products/${id}`);
-      setComponents((data.components || []) as ProductCompRow[]);
+      await loadProductDetails(id);
+
       setAddRows([]);
       setAddSearch({});
       setAddChoices({});
+
       alert("Komponent(ler) eklendi.");
     } catch (err: any) {
       console.error("add persist error:", err?.response?.data || err);
@@ -384,6 +481,7 @@ export default function ProductDetailPage() {
     setComponents((prev) =>
       prev.filter((r) => !(r.id === row.id && r.link_id === row.link_id))
     );
+
     setRemovals((prev) => [
       ...prev,
       {
@@ -393,6 +491,7 @@ export default function ProductDetailPage() {
         unit: row.unit,
         master_name: row.master?.name ?? null,
         original_consume: row.consume_qty,
+        return_qty: isEaUnit(row.unit) ? undefined : row.consume_qty,
         warehouse_id: "",
         location_id: "",
       },
@@ -403,6 +502,7 @@ export default function ProductDetailPage() {
     setComponents((prev) =>
       prev.filter((r) => !(r.id === row.id && r.link_id === row.link_id))
     );
+
     setScraps((prev) => [
       ...prev,
       {
@@ -412,7 +512,7 @@ export default function ProductDetailPage() {
         unit: row.unit,
         master_name: row.master?.name ?? null,
         original_consume: row.consume_qty,
-        fire_qty: row.unit === "EA" ? 1 : row.consume_qty, // default
+        fire_qty: isEaUnit(row.unit) ? undefined : row.consume_qty,
         reason: "",
       },
     ]);
@@ -420,34 +520,35 @@ export default function ProductDetailPage() {
 
   /* ------ Toplam kontrolü: aynı link için iade + hurda <= original ------ */
   const totalOveruseError = useMemo(() => {
-    // link_id bazında topla
     const byLink: Record<
       string,
       { original?: number; ret?: number; fire?: number }
     > = {};
+
     removals.forEach((r) => {
       const k = String(r.link_id ?? `${r.component_id}-x`);
       byLink[k] = byLink[k] || {};
       byLink[k].original = r.original_consume;
-      const add =
-        r.unit === "EA"
-          ? r.original_consume || 1
-          : Number(r.return_qty ?? 0);
+
+      const add = isEaUnit(r.unit) ? 1 : Number(r.return_qty ?? 0);
       byLink[k].ret = (byLink[k].ret || 0) + (add || 0);
     });
+
     scraps.forEach((s) => {
       const k = String(s.link_id ?? `${s.component_id}-x`);
       byLink[k] = byLink[k] || {};
       byLink[k].original = s.original_consume;
-      const add = s.unit === "EA" ? 1 : Number(s.fire_qty ?? 0);
+
+      const add = isEaUnit(s.unit) ? 1 : Number(s.fire_qty ?? 0);
       byLink[k].fire = (byLink[k].fire || 0) + (add || 0);
     });
-    // ihlal var mı?
+
     const offenders = Object.values(byLink).filter((v) => {
       const orig = Number(v.original || 0);
       const sum = Number(v.ret || 0) + Number(v.fire || 0);
-      return sum > orig + 1e-9; // floating toleransı
+      return sum > orig + 1e-9;
     });
+
     return offenders.length > 0;
   }, [removals, scraps]);
 
@@ -455,19 +556,21 @@ export default function ProductDetailPage() {
   const handleRemovalPersist = async () => {
     try {
       if (!removals.length || totalOveruseError) return;
+
       const items = removals.map((r) => ({
         link_id: r.link_id!,
         component_id: r.component_id,
-        new_barcode: (r.new_barcode || "").trim() || undefined,
-        return_qty:
-          r.unit === "EA" ? undefined : r.return_qty ?? r.original_consume,
-        warehouse_id: Number(r.warehouse_id),
-        location_id: Number(r.location_id),
+        return_qty: isEaUnit(r.unit)
+          ? undefined
+          : Number(r.return_qty || 0),
+        warehouse_id: r.warehouse_id ? Number(r.warehouse_id) : undefined,
+        location_id: r.location_id ? Number(r.location_id) : undefined,
       }));
+
       await api.post(`/products/${id}/components/remove`, items);
-      const { data } = await api.get(`/products/${id}`);
-      setComponents((data.components || []) as ProductCompRow[]);
+      await loadProductDetails(id);
       setRemovals([]);
+
       alert("Komponent(ler) iade edildi.");
     } catch (err: any) {
       console.error("remove persist error:", err?.response?.data || err);
@@ -479,18 +582,21 @@ export default function ProductDetailPage() {
   const handleScrapPersist = async () => {
     try {
       if (!scraps.length || totalOveruseError) return;
+
       const items = scraps.map((s) => ({
         link_id: s.link_id!,
         component_id: s.component_id,
         is_scrap: true,
-        fire_qty:
-          s.unit === "EA" ? undefined : s.fire_qty ?? s.original_consume,
+        fire_qty: isEaUnit(s.unit)
+          ? undefined
+          : Number(s.fire_qty || 0),
         reason: (s.reason || "").trim() || undefined,
       }));
+
       await api.post(`/products/${id}/components/remove`, items);
-      const { data } = await api.get(`/products/${id}`);
-      setComponents((data.components || []) as ProductCompRow[]);
+      await loadProductDetails(id);
       setScraps([]);
+
       alert("Hurdaya ayırma işlemi kaydedildi.");
     } catch (err: any) {
       console.error("scrap persist error:", err?.response?.data || err);
@@ -510,15 +616,18 @@ export default function ProductDetailPage() {
     try {
       setTlLoading(true);
       setTlError(null);
+
       const params = {
         item_type: "product",
         item_id: id,
         limit: TL_PAGE,
         offset: reset ? 0 : tlOffset,
       };
+
       const { data } = await api.get(`/inventory-transitions`, { params });
       const rows: TransitionRow[] = data?.rows || data || [];
       const total: number = data?.total ?? rows.length;
+
       setTlItems((prev) => (reset ? rows : [...prev, ...rows]));
       setTlTotal(total);
       setTlOffset((prev) => (reset ? rows.length : prev + rows.length));
@@ -529,40 +638,47 @@ export default function ProductDetailPage() {
       setTlLoading(false);
     }
   };
+
   useEffect(() => {
     setTlItems([]);
     setTlOffset(0);
     setTlTotal(0);
-    fetchTransitions(true).catch(() => {});
+    fetchTransitions(true).catch(() => { });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const fmt = (d?: string) => (d ? new Date(d).toLocaleString() : "");
+
   const lineFor = (t: TransitionRow) => {
     const parts: string[] = [];
     parts.push(humanize(t.action));
+
     if (typeof t.qty_delta === "number" && t.unit) {
       const sign = t.qty_delta > 0 ? "+" : t.qty_delta < 0 ? "−" : "±";
       parts.push(`• ${sign}${Math.abs(t.qty_delta)} ${t.unit}`);
     }
+
     if (t.from_status_id || t.to_status_id) {
       parts.push(
         `• Durum: ${t.from_status_label ?? "—"} → ${t.to_status_label ?? "—"}`
       );
     }
+
     if (t.from_warehouse_id || t.to_warehouse_id) {
       parts.push(
-        `• Yer: ${t.from_warehouse_name ?? "—"}/${t.from_location_name ?? "—"} → ${
-          t.to_warehouse_name ?? "—"
+        `• Yer: ${t.from_warehouse_name ?? "—"}/${t.from_location_name ?? "—"} → ${t.to_warehouse_name ?? "—"
         }/${t.to_location_name ?? "—"}`
       );
     }
+
     if (t.meta && typeof t.meta === "object") {
       if (t.meta.new_barcode) parts.push(`• Yeni barkod: ${t.meta.new_barcode}`);
       if (t.meta.link_id) parts.push(`• Link: ${t.meta.link_id}`);
     }
+
     return parts.join("  ");
   };
+
   const tlHasMore = tlItems.length < tlTotal;
 
   return (
@@ -631,7 +747,7 @@ export default function ProductDetailPage() {
                     const next = v ? Number(v) : "";
                     setWarehouseId(next as any);
                     if (v) await ensureLocations(Number(v));
-                    setLocationId(""); // depo değişince lokasyonu sıfırla
+                    setLocationId("");
                   }}
                   placeholder="Seçiniz"
                 />
@@ -668,9 +784,7 @@ export default function ProductDetailPage() {
             </div>
           </ComponentCard>
 
-          {/* PRODUCT: bağlı komponentler + ekleme */}
           <ComponentCard title="Bağlı Komponentler">
-            {/* mevcut bağlı komponentler tablosu */}
             <div className="overflow-x-auto">
               <table className="w-full text-sm text-gray-700 dark:text-gray-200">
                 <thead>
@@ -692,7 +806,7 @@ export default function ProductDetailPage() {
                         <td className="px-3 py-2">{c.barcode}</td>
                         <td className="px-3 py-2">{c.master?.name ?? "-"}</td>
                         <td className="px-3 py-2">{c.consume_qty}</td>
-                        <td className="px-3 py-2">{c.unit}</td>
+                        <td className="px-3 py-2">{c.unit || "-"}</td>
                         <td className="px-3 py-2 flex gap-2">
                           <Button
                             variant="outline"
@@ -722,7 +836,6 @@ export default function ProductDetailPage() {
               </table>
             </div>
 
-            {/* aynı kart içinde: komponent ekleme alanı */}
             <div className="mt-6 border-t border-gray-100 pt-4 dark:border-gray-800">
               <div className="mb-2 text-sm font-medium text-gray-800 dark:text-gray-100">
                 Komponent Ekle
@@ -733,7 +846,6 @@ export default function ProductDetailPage() {
                   const selected = r.stock;
                   const q = addSearch[r.key] ?? "";
                   const all = addChoices[r.key] ?? [];
-                  // diğer satırlarda seçilenleri gizle
                   const visible = all.filter(
                     (x) => x.id === selected?.id || !selectedAddIds.includes(x.id)
                   );
@@ -744,7 +856,6 @@ export default function ProductDetailPage() {
                       className="relative grid items-start gap-3 md:grid-cols-[minmax(260px,1fr)_minmax(160px,220px)_minmax(120px,160px)_auto]"
                       data-comp-picker
                     >
-                      {/* Component seçimi */}
                       <div>
                         <Label>Component</Label>
                         <div
@@ -799,11 +910,10 @@ export default function ProductDetailPage() {
                                         onClick={() =>
                                           chooseAddComponent(idx, row)
                                         }
-                                        className={`cursor-pointer transition ${
-                                          selected?.id === row.id
-                                            ? "bg-brand-500/5 dark:bg-brand-500/10"
-                                            : "hover:bg-gray-50/70 dark:hover:bg-white/5"
-                                        }`}
+                                        className={`cursor-pointer transition ${selected?.id === row.id
+                                          ? "bg-brand-500/5 dark:bg-brand-500/10"
+                                          : "hover:bg-gray-50/70 dark:hover:bg-white/5"
+                                          }`}
                                       >
                                         <td className="px-3 py-2">
                                           {row.barcode}
@@ -858,9 +968,8 @@ export default function ProductDetailPage() {
                         )}
                       </div>
 
-                      {/* Miktar */}
                       <div>
-                        <Label>Kullanılacak Miktar</Label>
+                        <Label>{selected && isAreaUnit(selected.unit) ? "Kullanılacak Alan" : "Kullanılacak Miktar"}</Label>
                         {selected?.unit === "EA" ? (
                           <Input disabled value="1" />
                         ) : (
@@ -868,17 +977,15 @@ export default function ProductDetailPage() {
                             type="number"
                             min="0"
                             max={String(selected?.quantity ?? 0)}
+                            step="0.001"
                             value={r.consumeQty ?? ""}
                             onChange={(e) => setAddQty(r.key, e.target.value)}
-                            placeholder={
-                              selected ? `0 - ${selected.quantity}` : ""
-                            }
+                            placeholder={selected ? `0 - ${selected.quantity}` : ""}
                             disabled={!selected}
                           />
                         )}
                       </div>
 
-                      {/* Birim */}
                       <div className="md:justify-self-start">
                         <Label>Birim</Label>
                         <div className="h-11 flex items-center">
@@ -888,7 +995,6 @@ export default function ProductDetailPage() {
                         </div>
                       </div>
 
-                      {/* Satır kaldır */}
                       <div className="md:justify-self-end">
                         <Label className="invisible">Aksiyon</Label>
                         <div className="h-11 flex items-center">
@@ -920,25 +1026,24 @@ export default function ProductDetailPage() {
             </div>
           </ComponentCard>
 
-          {/* PRODUCT: Kaldırılacaklar (İade) */}
           {removals.length > 0 && (
-            <ComponentCard title="Kaldırılacaklar (İade)">
+            <ComponentCard title="Depoya İade">
               {totalOveruseError && (
                 <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
                   Uyarı: Aynı komponent için iade + hurda toplamı kullanılan miktardan fazla olamaz.
                 </div>
               )}
+
               <div className="overflow-x-auto">
                 <table className="w-full text-sm text-gray-700 dark:text-gray-200">
                   <thead>
                     <tr className="text-left text-gray-500 dark:text-gray-400">
                       <th className="px-3 py-2">Barkod</th>
-                      <th className="px-3 py-2">Yeni Barkod (ops.)</th>
                       <th className="px-3 py-2">Tanım</th>
-                      <th className="px-3 py-2">Miktar (ops.)</th>
+                      <th className="px-3 py-2">İade Miktarı</th>
                       <th className="px-3 py-2">Birim</th>
-                      <th className="px-3 py-2">Depo</th>
-                      <th className="px-3 py-2">Lokasyon</th>
+                      <th className="px-3 py-2">Hedef Depo</th>
+                      <th className="px-3 py-2">Hedef Lokasyon</th>
                       <th className="px-3 py-2">Aksiyon</th>
                     </tr>
                   </thead>
@@ -952,59 +1057,39 @@ export default function ProductDetailPage() {
                             : []
                         ).map((l) => ({ value: String(l.id), label: l.name })),
                       ];
+
                       return (
                         <tr
                           key={`ret-${idx}`}
                           className="border-t border-gray-100 dark:border-gray-800"
                         >
                           <td className="px-3 py-2">{r.barcode}</td>
-                          <td className="px-3 py-2">
-                            <Input
-                              value={r.new_barcode || ""}
-                              onChange={(e) =>
-                                setRemovals((prev) =>
-                                  prev.map((x, i) =>
-                                    i === idx
-                                      ? { ...x, new_barcode: e.target.value }
-                                      : x
-                                  )
-                                )
-                              }
-                              placeholder="Opsiyonel"
-                            />
-                          </td>
                           <td className="px-3 py-2">{r.master_name ?? "-"}</td>
-                          <td className="px-3 py-2">
-                            <Input
-                              type="number"
-                              min="0"
-                              max={String(r.original_consume)}
-                              disabled={r.unit === "EA"}
-                              value={
-                                r.unit === "EA"
-                                  ? r.original_consume
-                                  : r.return_qty ?? ""
-                              }
-                              onChange={(e) =>
-                                setRemovals((prev) =>
-                                  prev.map((x, i) =>
-                                    i === idx
-                                      ? {
+                          <td className="px-3 py-2 min-w-[220px]">
+                            {isEaUnit(r.unit) ? (
+                              <Input disabled value="1" />
+                            ) : (
+                              <Input
+                                type="number"
+                                min="0"
+                                max={String(r.original_consume)}
+                                step="0.001"
+                                value={r.return_qty ?? ""}
+                                onChange={(e) =>
+                                  setRemovals((prev) =>
+                                    prev.map((x, i) =>
+                                      i === idx
+                                        ? {
                                           ...x,
-                                          return_qty: Number(
-                                            e.target.value || 0
-                                          ),
+                                          return_qty: Number(e.target.value || 0),
                                         }
-                                      : x
+                                        : x
+                                    )
                                   )
-                                )
-                              }
-                              placeholder={
-                                r.unit === "EA"
-                                  ? ""
-                                  : `0 - ${r.original_consume}`
-                              }
-                            />
+                                }
+                                placeholder={`0 - ${r.original_consume}`}
+                              />
+                            )}
                           </td>
                           <td className="px-3 py-2">{r.unit}</td>
                           <td className="px-3 py-2 min-w-[160px]">
@@ -1033,9 +1118,9 @@ export default function ProductDetailPage() {
                                   prev.map((x, i) =>
                                     i === idx
                                       ? {
-                                          ...x,
-                                          location_id: v ? Number(v) : "",
-                                        }
+                                        ...x,
+                                        location_id: v ? Number(v) : "",
+                                      }
                                       : x
                                   )
                                 )
@@ -1076,20 +1161,21 @@ export default function ProductDetailPage() {
                 <Button
                   variant="primary"
                   onClick={() => {
-                    handleRemovalPersist().catch(() => {});
+                    handleRemovalPersist().catch(() => { });
                   }}
                   disabled={
                     totalOveruseError ||
                     !removals.length ||
-                    !removals.every(
-                      (r) =>
-                        r.warehouse_id &&
-                        r.location_id &&
-                        (r.unit === "EA" ||
-                          (typeof r.return_qty === "number" &&
-                            r.return_qty > 0 &&
-                            r.return_qty <= r.original_consume))
-                    )
+                    !removals.every((r) => {
+                      if (!r.warehouse_id || !r.location_id) return false;
+                      if (isEaUnit(r.unit)) return true;
+
+                      return (
+                        typeof r.return_qty === "number" &&
+                        r.return_qty > 0 &&
+                        r.return_qty <= r.original_consume
+                      );
+                    })
                   }
                 >
                   Kaydet (İade)
@@ -1098,21 +1184,21 @@ export default function ProductDetailPage() {
             </ComponentCard>
           )}
 
-          {/* PRODUCT: Hurdaya ayrılacaklar */}
           {scraps.length > 0 && (
-            <ComponentCard title="Hurdaya Ayrılacaklar (FIRE)">
+            <ComponentCard title="Hurdaya Ayır">
               {totalOveruseError && (
                 <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
                   Uyarı: Aynı komponent için iade + hurda toplamı kullanılan miktardan fazla olamaz.
                 </div>
               )}
+
               <div className="overflow-x-auto">
                 <table className="w-full text-sm text-gray-700 dark:text-gray-200">
                   <thead>
                     <tr className="text-left text-gray-500 dark:text-gray-400">
                       <th className="px-3 py-2">Barkod</th>
                       <th className="px-3 py-2">Tanım</th>
-                      <th className="px-3 py-2">FIRE Miktarı</th>
+                      <th className="px-3 py-2">FIRE Bilgisi</th>
                       <th className="px-3 py-2">Birim</th>
                       <th className="px-3 py-2">Neden (ops.)</th>
                       <th className="px-3 py-2">Aksiyon</th>
@@ -1126,31 +1212,31 @@ export default function ProductDetailPage() {
                       >
                         <td className="px-3 py-2">{s.barcode}</td>
                         <td className="px-3 py-2">{s.master_name ?? "-"}</td>
-                        <td className="px-3 py-2">
-                          <Input
-                            type="number"
-                            min="0"
-                            max={String(s.original_consume)}
-                            disabled={s.unit === "EA"}
-                            value={
-                              s.unit === "EA" ? s.original_consume : s.fire_qty ?? ""
-                            }
-                            onChange={(e) =>
-                              setScraps((prev) =>
-                                prev.map((x, i) =>
-                                  i === idx
-                                    ? {
+                        <td className="px-3 py-2 min-w-[220px]">
+                          {isEaUnit(s.unit) ? (
+                            <Input disabled value="1" />
+                          ) : (
+                            <Input
+                              type="number"
+                              min="0"
+                              max={String(s.original_consume)}
+                              step="0.001"
+                              value={s.fire_qty ?? ""}
+                              onChange={(e) =>
+                                setScraps((prev) =>
+                                  prev.map((x, i) =>
+                                    i === idx
+                                      ? {
                                         ...x,
                                         fire_qty: Number(e.target.value || 0),
                                       }
-                                    : x
+                                      : x
+                                  )
                                 )
-                              )
-                            }
-                            placeholder={
-                              s.unit === "EA" ? "" : `0 - ${s.original_consume}`
-                            }
-                          />
+                              }
+                              placeholder={`0 - ${s.original_consume}`}
+                            />
+                          )}
                         </td>
                         <td className="px-3 py-2">{s.unit}</td>
                         <td className="px-3 py-2">
@@ -1199,18 +1285,20 @@ export default function ProductDetailPage() {
                 <Button
                   variant="primary"
                   onClick={() => {
-                    handleScrapPersist().catch(() => {});
+                    handleScrapPersist().catch(() => { });
                   }}
                   disabled={
                     totalOveruseError ||
                     !scraps.length ||
-                    !scraps.every(
-                      (s) =>
-                        s.unit === "EA" ||
-                        (typeof s.fire_qty === "number" &&
-                          s.fire_qty > 0 &&
-                          s.fire_qty <= s.original_consume)
-                    )
+                    !scraps.every((s) => {
+                      if (isEaUnit(s.unit)) return true;
+
+                      return (
+                        typeof s.fire_qty === "number" &&
+                        s.fire_qty > 0 &&
+                        s.fire_qty <= s.original_consume
+                      );
+                    })
                   }
                 >
                   Kaydet (FIRE)
@@ -1219,7 +1307,6 @@ export default function ProductDetailPage() {
             </ComponentCard>
           )}
 
-          {/* ---------- TIMELINE ---------- */}
           <ComponentCard title="Geçmiş">
             {tlError && (
               <div className="mb-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-200">
@@ -1253,15 +1340,15 @@ export default function ProductDetailPage() {
 
                     {(t.notes ||
                       (t.meta && Object.keys(t.meta || {}).length)) && (
-                      <div className="mt-2 rounded-lg bg-gray-50 p-2 text-xs text-gray-600 dark:bg.white/5 dark:text-gray-300">
-                        {t.notes ? <div>Not: {t.notes}</div> : null}
-                        {t.meta && Object.keys(t.meta || {}).length ? (
-                          <pre className="mt-1 overflow-auto whitespace-pre-wrap break-words">
-                            {JSON.stringify(t.meta, null, 2)}
-                          </pre>
-                        ) : null}
-                      </div>
-                    )}
+                        <div className="mt-2 rounded-lg bg-gray-50 p-2 text-xs text-gray-600 dark:bg.white/5 dark:text-gray-300">
+                          {t.notes ? <div>Not: {t.notes}</div> : null}
+                          {t.meta && Object.keys(t.meta || {}).length ? (
+                            <pre className="mt-1 overflow-auto whitespace-pre-wrap break-words">
+                              {JSON.stringify(t.meta, null, 2)}
+                            </pre>
+                          ) : null}
+                        </div>
+                      )}
                   </li>
                 ))}
               </ul>

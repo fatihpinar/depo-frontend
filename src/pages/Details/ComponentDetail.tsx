@@ -64,6 +64,7 @@ export default function ComponentDetailPage() {
   const [weight, setWeight] = useState<number | "">("");
   const [length, setLength] = useState<number | "">("");
   const [volume, setVolume] = useState<number | "">(""); // ✅ YENİ (hacim)
+  const [boxUnit, setBoxUnit] = useState<number | "">("");
 
   // master meta
   const [masterCode, setMasterCode] = useState<string>("");
@@ -75,13 +76,15 @@ export default function ComponentDetailPage() {
   const isWeight = masterStockUnit === "weight";
   const isLength = masterStockUnit === "length";
   const isUnit = masterStockUnit === "unit";
-  const isVolume = masterStockUnit === "volume"; // ✅ YENİ
+  const isVolume = masterStockUnit === "volume";
+  const isBoxUnit = masterStockUnit === "box_unit";
 
   const widthEnabled = isArea;
   const heightEnabled = isArea;
   const weightEnabled = isWeight;
   const lengthEnabled = isLength;
-  const volumeEnabled = isVolume; // ✅ YENİ
+  const volumeEnabled = isVolume;
+  const boxUnitEnabled = isBoxUnit;
 
   // stock_unit değişince pasif kalanları temizle
   useEffect(() => {
@@ -92,10 +95,11 @@ export default function ComponentDetailPage() {
     }
     if (!isWeight) setWeight("");
     if (!isLength) setLength("");
-    if (!isVolume) setVolume(""); // ✅ YENİ
+    if (!isVolume) setVolume("");
+    if (!isBoxUnit) setBoxUnit("");
     // unit ise zaten hepsi pasif olacak
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [masterStockUnit]);
+  }, [masterStockUnit, isArea, isWeight, isLength, isVolume, isBoxUnit]);
 
   // en/boy değişince alanı canlı hesapla (sadece area modunda)
   useEffect(() => {
@@ -114,7 +118,11 @@ export default function ComponentDetailPage() {
       return;
     }
 
-    setArea(w * h);
+    // mm → metre çevir
+    const w_m = w / 1000;
+    const h_m = h / 1000;
+
+    setArea(w_m * h_m);
   }, [width, height, isArea]);
 
   /* ------ seçenekler ------ */
@@ -155,6 +163,8 @@ export default function ComponentDetailPage() {
     if (v === "area") return "Alan";
     if (v === "weight") return "Ağırlık";
     if (v === "length") return "Uzunluk";
+    if (v === "volume") return "Hacim";
+    if (v === "box_unit") return "Koli İçi Adet";
     if (v === "unit") return "Adet";
     return v;
   };
@@ -236,15 +246,15 @@ export default function ComponentDetailPage() {
             ? Number(data.height)
             : null;
 
-        setWidth(wNum !== null && !Number.isNaN(wNum) ? wNum : "");
-        setHeight(hNum !== null && !Number.isNaN(hNum) ? hNum : "");
+        setWidth(wNum !== null && !Number.isNaN(wNum) ? wNum * 1000 : "");
+        setHeight(hNum !== null && !Number.isNaN(hNum) ? hNum * 1000 : "");
 
         const areaNum =
           data.area !== null && data.area !== undefined
             ? Number(data.area)
             : wNum !== null && hNum !== null
-            ? wNum * hNum
-            : null;
+              ? wNum * hNum
+              : null;
 
         setArea(areaNum !== null && !Number.isNaN(areaNum) ? areaNum : "");
 
@@ -268,6 +278,13 @@ export default function ComponentDetailPage() {
         // ✅ volume
         const volumeNum =
           data.volume !== null && data.volume !== undefined ? Number(data.volume) : null;
+
+        const boxUnitNum =
+          data.box_unit !== null && data.box_unit !== undefined
+            ? Number(data.box_unit)
+            : null;
+
+        setBoxUnit(boxUnitNum !== null && !Number.isNaN(boxUnitNum) ? boxUnitNum : "");
 
         setVolume(volumeNum !== null && !Number.isNaN(volumeNum) ? volumeNum : "");
 
@@ -299,6 +316,7 @@ export default function ComponentDetailPage() {
       let outWeight: number | null = null;
       let outLength: number | null = null;
       let outVolume: number | null = null;
+      let outBoxUnit: number | null = null;
 
       if (isArea) {
         // en/boy opsiyonel; girildiyse ikisi birlikte ve >0 olmalı
@@ -317,9 +335,12 @@ export default function ComponentDetailPage() {
             alert("En ve Boy 0'dan büyük sayılar olmalıdır.");
             return;
           }
-          outWidth = w;
-          outHeight = h;
-          outArea = w * h;
+          const w_m = w / 1000;
+          const h_m = h / 1000;
+
+          outWidth = w_m;
+          outHeight = h_m;
+          outArea = w_m * h_m;
         }
       }
 
@@ -362,6 +383,19 @@ export default function ComponentDetailPage() {
         outVolume = vv;
       }
 
+      if (isBoxUnit) {
+        if (boxUnit === "") {
+          alert("Koli içi adet girilmelidir.");
+          return;
+        }
+        const bb = Number(boxUnit);
+        if (!Number.isFinite(bb) || bb <= 0) {
+          alert("Koli içi adet 0'dan büyük sayı olmalıdır.");
+          return;
+        }
+        outBoxUnit = bb;
+      }
+
       if (isUnit) {
         // hepsi null kalacak
       }
@@ -375,13 +409,13 @@ export default function ComponentDetailPage() {
         invoice_no: invoiceNo.trim() ? invoiceNo.trim() : null,
         notes: notes || null,
 
-        // 5 alan
         width: outWidth,
         height: outHeight,
         area: outArea,
         weight: outWeight,
         length: outLength,
-        volume: outVolume, // ✅ YENİ
+        volume: outVolume,
+        box_unit: outBoxUnit,
       };
 
       await api.put(`/components/${id}`, payload);
@@ -428,7 +462,7 @@ export default function ComponentDetailPage() {
     setTlItems([]);
     setTlOffset(0);
     setTlTotal(0);
-    fetchTransitions(true).catch(() => {});
+    fetchTransitions(true).catch(() => { });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -438,9 +472,9 @@ export default function ComponentDetailPage() {
   const currentMaster = masters.find((m) => m.id === masterId);
   const masterDisplay = currentMaster
     ? currentMaster.display_label ||
-      currentMaster.bimeks_product_name ||
-      currentMaster.name ||
-      ""
+    currentMaster.bimeks_product_name ||
+    currentMaster.name ||
+    ""
     : "";
 
   return (
@@ -495,7 +529,7 @@ export default function ComponentDetailPage() {
               </div>
 
               <div>
-                <Label>Alan</Label>
+                <Label>Alan (m²)</Label>
                 <Input
                   type="number"
                   value={area === "" ? "" : String(area)}
@@ -505,7 +539,7 @@ export default function ComponentDetailPage() {
               </div>
 
               <div>
-                <Label>En</Label>
+                <Label>En (mm)</Label>
                 <Input
                   type="number"
                   value={width === "" ? "" : String(width)}
@@ -518,7 +552,7 @@ export default function ComponentDetailPage() {
               </div>
 
               <div>
-                <Label>Boy</Label>
+                <Label>Boy (mm)</Label>
                 <Input
                   type="number"
                   value={height === "" ? "" : String(height)}
@@ -533,7 +567,7 @@ export default function ComponentDetailPage() {
               </div>
 
               <div>
-                <Label>Ağırlık</Label>
+                <Label>Ağırlık(kg)</Label>
                 <Input
                   type="number"
                   value={weight === "" ? "" : String(weight)}
@@ -548,7 +582,7 @@ export default function ComponentDetailPage() {
               </div>
 
               <div>
-                <Label>Uzunluk</Label>
+                <Label>Uzunluk (m)</Label>
                 <Input
                   type="number"
                   value={length === "" ? "" : String(length)}
@@ -563,7 +597,7 @@ export default function ComponentDetailPage() {
               </div>
 
               <div>
-                <Label>Hacim</Label>
+                <Label>Hacim (lt)</Label>
                 <Input
                   type="number"
                   value={volume === "" ? "" : String(volume)}
@@ -574,7 +608,18 @@ export default function ComponentDetailPage() {
                   disabled={!volumeEnabled}
                 />
               </div>
-
+              <div>
+                <Label>Koli İçi Adet (ea)</Label>
+                <Input
+                  type="number"
+                  value={boxUnit === "" ? "" : String(boxUnit)}
+                  onChange={(e) =>
+                    setBoxUnit(e.target.value === "" ? "" : Number(e.target.value))
+                  }
+                  placeholder={boxUnitEnabled ? "Zorunlu" : "—"}
+                  disabled={!boxUnitEnabled}
+                />
+              </div>
               <div>
                 <Label>Depo</Label>
                 <Select
@@ -678,16 +723,16 @@ export default function ComponentDetailPage() {
                       {(!!t.notes ||
                         (!!t.meta &&
                           Object.keys(t.meta || {}).length > 0)) && (
-                        <div className="mt-2 rounded-lg bg-gray-50 p-2 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-300">
-                          {t.notes ? <div>Not: {t.notes}</div> : null}
-                          {!!t.meta &&
-                          Object.keys(t.meta || {}).length > 0 ? (
-                            <pre className="mt-1 overflow-auto whitespace-pre-wrap break-words">
-                              {JSON.stringify(t.meta, null, 2)}
-                            </pre>
-                          ) : null}
-                        </div>
-                      )}
+                          <div className="mt-2 rounded-lg bg-gray-50 p-2 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-300">
+                            {t.notes ? <div>Not: {t.notes}</div> : null}
+                            {!!t.meta &&
+                              Object.keys(t.meta || {}).length > 0 ? (
+                              <pre className="mt-1 overflow-auto whitespace-pre-wrap break-words">
+                                {JSON.stringify(t.meta, null, 2)}
+                              </pre>
+                            ) : null}
+                          </div>
+                        )}
                     </li>
                   );
                 })}
